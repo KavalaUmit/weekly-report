@@ -19,6 +19,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "postbuild": "powershell -NoProfile -Command \"robocopy build iis-deploy /E /PURGE; if ($LASTEXITCODE -le 7) { exit 0 }\"",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

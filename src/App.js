@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import * as api from './api';
 import {
   Container,
   Box,
@@ -20,7 +21,8 @@ import {
   Divider,
   Menu,
   Chip,
-  FormHelperText
+  FormHelperText,
+  Tooltip
 } from '@mui/material';
 import {
   Save,
@@ -35,7 +37,9 @@ import {
   Delete,
   Article,
   Add,
-  InsertPhoto
+  InsertPhoto,
+  ChevronLeft,
+  ChevronRight
 } from '@mui/icons-material';
 
 function App() {
@@ -51,6 +55,7 @@ function App() {
   const [actions, setActions] = useState([]);
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [actionStatuses, setActionStatuses] = useState({});
+  const [statusList, setStatusList] = useState([]);
   const [excludedFromReport] = useState(new Set());
   const [errors, setErrors] = useState({
     week: false,
@@ -64,41 +69,55 @@ function App() {
   const [activeCounterFilter, setActiveCounterFilter] = useState(null);
   const [editingActionId, setEditingActionId] = useState(null);
   const [userData, setUserData] = useState({
-    FullName: 'ÜMİT KAVALA',
-    DepartmentName: 'Team Name',
-    UnitName: 'İş Süreç Platformları',
-    LineName: 'Company Line Name',
-    Title: 'Manager'
+    UserID: null,
+    FullName: '',
+    DepartmentID: null,
+    DepartmentName: '',
+    UnitID: null,
+    UnitName: '',
+    LineID: null,
+    LineName: '',
+    Title: '',
+    PositionNumber: null
   });
+  const [lines, setLines] = useState([]);
+  const [selectedLineId, setSelectedLineId] = useState(null);
+  const [userError, setUserError] = useState(null);
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+  const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const dateInputRef = useRef(null);
 
   useEffect(() => {
     // Fetch user data from REST service
-    const windowName = window.name || window.location.hostname || 'HaftalikRapor';
-    fetch(`http://localhost:4443/user/getuserdata?windowName=${encodeURIComponent(windowName)}`)
+    const windowName = window.name || process.env.REACT_APP_WINDOW_NAME || window.location.hostname;
+    api.getUser(windowName)
       .then(res => {
-        if (!res.ok) throw new Error('Service unavailable');
+        if (res.status === 404) {
+          setUserError({ type: 'not_found', windowName });
+          throw new Error('not_found');
+        }
+        if (!res.ok) {
+          setUserError({ type: 'service_unavailable', windowName });
+          throw new Error('service_unavailable');
+        }
         return res.json();
       })
       .then(data => {
         setUserData({
-          FullName: data.FullName || 'ÜMİT KAVALA',
-          DepartmentName: data.DepartmentName || 'Team Name',
-          UnitName: data.UnitName || 'İş Süreç Platformları',
-          LineName: data.LineName || 'Company Line Name',
-          Title: data.Title || 'Manager'
+          UserID: data.UserID || null,
+          FullName: data.FullName || '',
+          DepartmentID: data.DepartmentID || null,
+          DepartmentName: data.DepartmentName || '',
+          UnitID: data.UnitID || null,
+          UnitName: data.UnitName || '',
+          LineID: data.LineID || null,
+          LineName: data.LineName || '',
+          Title: data.Title || '',
+          PositionNumber: data.PositionNumber || null
         });
+        if (data.LineID) setSelectedLineId(data.LineID);
       })
-      .catch(() => {
-        // Service not available — use hardcoded defaults
-        setUserData({
-          FullName: 'ÜMİT KAVALA',
-          DepartmentName: 'Team Name',
-          UnitName: 'İş Süreç Platformları',
-          LineName: 'Company Line Name',
-          Title: 'Manager'
-        });
-      });
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -109,50 +128,91 @@ function App() {
     const oneWeek = 1000 * 60 * 60 * 24 * 7;
     const currentWeek = Math.floor(diff / oneWeek) + 1;
 
-    // Load weeks from text file
-    fetch('/data/weeks.txt')
-      .then(response => response.text())
+    // Load weeks from REST service
+    api.getWeeks(new Date().getFullYear())
       .then(data => {
-        const weekList = data.split('\n').filter(line => line.trim());
-        setWeeks(weekList);
-        // Set current week as default if it exists in the list
+        setWeeks(data);
         const currentWeekStr = currentWeek.toString();
-        if (weekList.includes(currentWeekStr)) {
+        const weekObj = data.find(w => String(w.WeekNumber) === currentWeekStr);
+        if (weekObj) {
           setFormData(prev => ({ ...prev, week: currentWeekStr }));
+          loadActionsForWeek(weekObj.WeekNumber, weekObj.Year);
         }
       })
       .catch(error => {
         console.error('Error loading weeks:', error);
-        // Fallback data
-        const fallbackWeeks = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53'];
+        const year = new Date().getFullYear();
+        const fallbackWeeks = Array.from({ length: 52 }, (_, i) => ({ WeekNumber: i + 1, Year: year }));
         setWeeks(fallbackWeeks);
-        // Set current week as default
         const currentWeekStr = currentWeek.toString();
-        if (fallbackWeeks.includes(currentWeekStr)) {
+        const weekObj = fallbackWeeks.find(w => String(w.WeekNumber) === currentWeekStr);
+        if (weekObj) {
           setFormData(prev => ({ ...prev, week: currentWeekStr }));
+          loadActionsForWeek(weekObj.WeekNumber, weekObj.Year);
         }
       });
 
-    // Load types from text file
-    fetch('/data/types.txt')
-      .then(response => response.text())
+    // Load org lines for EVP/GM line picker
+    api.getLines()
+      .then(data => setLines(data))
+      .catch(() => {});
+
+    // Load action status list for StatusID lookup
+    api.getActionStatuses()
+      .then(data => setStatusList(data))
+      .catch(() => {});
+
+    // Load types from REST service
+    api.getActionTypes()
       .then(data => {
-        const typeList = data.split('\n').filter(line => line.trim());
-        setTypes(typeList);
+        setTypes(data);
       })
       .catch(error => {
         console.error('Error loading types:', error);
-        // Fallback data
-        setTypes(['Planlama', 'Geliştirme', 'Test', 'Dokümantasyon']);
+        setTypes([
+          { TypeID: null, TypeName: 'Planlama' },
+          { TypeID: null, TypeName: 'Geliştirme' },
+          { TypeID: null, TypeName: 'Test' },
+          { TypeID: null, TypeName: 'Dokümantasyon' }
+        ]);
       });
   }, []);
 
+  const loadActionsForWeek = async (weekNumber, year, lineId = null) => {
+    try {
+      const list = await api.getActions(weekNumber, year, lineId);
+      const actionsWithItems = await Promise.all(
+        list.map(async (a) => {
+          const items = await api.getActionItems(a.ActionID);
+          return {
+            id: a.ActionID,
+            week: String(a.WeekNumber),
+            type: a.TypeName,
+            date: a.ActionDate ? a.ActionDate.split('T')[0] : '',
+            actionItems: items.map(i => ({ type: i.ItemType, value: i.ItemValue })),
+            timestamp: new Date(a.CreatedAt).toLocaleString('tr-TR'),
+            statusKey: a.StatusKey || null
+          };
+        })
+      );
+      setActions(actionsWithItems);
+      const statuses = {};
+      actionsWithItems.forEach(a => { if (a.statusKey) statuses[a.id] = a.statusKey; });
+      setActionStatuses(statuses);
+      setExpandedNodes(new Set(actionsWithItems.map(a => a.week)));
+    } catch (err) {
+      console.error('Error loading actions:', err);
+    }
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (name === 'week' && value) {
+      const weekObj = weeks.find(w => String(w.WeekNumber) === value);
+      const isHighLevel = userData.PositionNumber >= 4;
+      if (weekObj) loadActionsForWeek(weekObj.WeekNumber, weekObj.Year, isHighLevel ? selectedLineId : null);
+    }
     if (name === 'week') {
       setActiveCounterFilter(null);
     }
@@ -161,58 +221,60 @@ function App() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleLineChange = (newLineId) => {
+    setSelectedLineId(newLineId);
+    if (formData.week) {
+      const weekObj = weeks.find(w => String(w.WeekNumber) === formData.week);
+      if (weekObj) loadActionsForWeek(weekObj.WeekNumber, weekObj.Year, newLineId);
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     const newErrors = {
       week: !formData.week,
       type: !formData.type,
       date: !formData.date,
       action: !formData.actionItems.some(a => a.type === 'image' ? !!a.value : a.value.trim())
     };
-    
     setErrors(newErrors);
-    
-    if (Object.values(newErrors).some(error => error)) {
-      return;
+    if (Object.values(newErrors).some(err => err)) return;
+
+    const weekObj = weeks.find(w => String(w.WeekNumber) === formData.week);
+    const typeObj = types.find(t => t.TypeName === formData.type);
+    const actionItems = formData.actionItems
+      .filter(a => a.type === 'image' ? !!a.value : a.value.trim())
+      .map(i => ({ type: i.type, value: i.value }));
+
+    try {
+      if (editingActionId) {
+        await api.updateAction(editingActionId, {
+          WeekID: weekObj?.WeekID,
+          TypeID: typeObj?.TypeID,
+          ActionDate: formData.date,
+          actionItems
+        });
+      } else {
+        await api.createAction({
+          UserID: userData.UserID,
+          WeekID: weekObj?.WeekID,
+          TypeID: typeObj?.TypeID,
+          ActionDate: formData.date,
+          actionItems
+        });
+      }
+      if (weekObj) {
+        await loadActionsForWeek(weekObj.WeekNumber, weekObj.Year);
+        setExpandedNodes(prev => new Set([...prev, formData.week]));
+      }
+    } catch (err) {
+      console.error('Error saving action:', err);
     }
 
-    if (editingActionId) {
-      // Update existing action
-      setActions(prev => prev.map(action => 
-        action.id === editingActionId 
-          ? { ...action, ...formData, actionItems: formData.actionItems.filter(a => a.type === 'image' ? !!a.value : a.value.trim()), timestamp: new Date().toLocaleString('tr-TR') }
-          : action
-      ));
-      setEditingActionId(null);
-    } else {
-      // Create new action
-      const newAction = {
-        id: Date.now(),
-        ...formData,
-        actionItems: formData.actionItems.filter(a => a.type === 'image' ? !!a.value : a.value.trim()),
-        timestamp: new Date().toLocaleString('tr-TR')
-      };
-
-      setActions(prev => [...prev, newAction]);
-      
-      // Auto-expand the week for the new action
-      setExpandedNodes(prev => new Set([...prev, formData.week]));
-    }
-    
-    // Reset form and errors (keep week selected)
-    setFormData({
-      week: formData.week,
-      type: '',
-      date: '',
-      actionItems: [{ type: 'text', value: '' }]
-    });
-    setErrors({
-      week: false,
-      type: false,
-      date: false,
-      action: false
-    });
+    setEditingActionId(null);
+    setFormData({ week: formData.week, type: '', date: '', actionItems: [{ type: 'text', value: '' }] });
+    setErrors({ week: false, type: false, date: false, action: false });
   };
 
   const handleActionItemChange = (index, value) => {
@@ -272,29 +334,43 @@ function App() {
     setSelectedActionId(null);
   };
 
-  const handleSetStatus = (status) => {
+  const handleSetStatus = async (statusKey) => {
     if (selectedActionId) {
-      setActionStatuses(prev => ({ ...prev, [selectedActionId]: status }));
+      setActionStatuses(prev => ({ ...prev, [selectedActionId]: statusKey }));
+      const statusObj = statusList.find(s => s.StatusKey === statusKey);
+      if (statusObj) {
+        try {
+          await api.patchActionStatus(selectedActionId, { StatusID: statusObj.StatusID, ChangedBy: userData.UserID });
+        } catch (err) { console.error('Error saving status:', err); }
+      }
     }
     handleCloseContextMenu();
   };
 
-  const handleRemoveFromReport = () => {
-    if (selectedActionId) {
-      setActionStatuses(prev => {
-        const updated = { ...prev };
-        delete updated[selectedActionId];
-        return updated;
-      });
-    }
+  const handleRemoveFromReport = async () => {
+    const id = selectedActionId;
     handleCloseContextMenu();
+    if (!id) return;
+    setActionStatuses(prev => {
+      const updated = { ...prev };
+      delete updated[id];
+      return updated;
+    });
+    try {
+      await api.patchActionStatus(id, { StatusID: null, ChangedBy: userData.UserID });
+    } catch (err) { console.error('Error clearing status:', err); }
   };
 
-  const handleDeleteAction = () => {
-    if (selectedActionId) {
-      setActions(prev => prev.filter(a => a.id !== selectedActionId));
-    }
+  const handleDeleteAction = async () => {
+    const id = selectedActionId;
     handleCloseContextMenu();
+    if (!id) return;
+    setActions(prev => prev.filter(a => a.id !== id));
+    setActionStatuses(prev => { const updated = { ...prev }; delete updated[id]; return updated; });
+    if (editingActionId === id) setEditingActionId(null);
+    try {
+      await api.deleteAction(id);
+    } catch (err) { console.error('Error deleting action:', err); }
   };
 
   const handleActionClick = (action) => {
@@ -337,8 +413,9 @@ function App() {
         return; // Skip if not the selected week
       }
       
-      // Apply status filter - show only actions with any status assigned
-      if (showOnlyWithStatus) {
+      // Apply status filter - EVP/GM always see only status-assigned actions
+      const forceStatusFilter = userData.PositionNumber >= 4;
+      if (showOnlyWithStatus || forceStatusFilter) {
         const actionStatus = actionStatuses[action.id];
         if (!actionStatus) {
           return; // Skip this action if it has no status
@@ -371,14 +448,52 @@ function App() {
     return found ? found.color : 'transparent';
   };
 
+  if (userError) {
+    return (
+      <Box sx={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(135deg, #003366 0%, #00447F 60%, #1464A0 100%)'
+      }}>
+        <Box sx={{
+          background: 'white', borderRadius: 4, p: { xs: 4, md: 6 }, maxWidth: 520, width: '90%',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.3)', textAlign: 'center'
+        }}>
+          <Box sx={{
+            width: 72, height: 72, borderRadius: '50%', background: '#fef2f2',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3
+          }}>
+            <Typography sx={{ fontSize: 36 }}>🚫</Typography>
+          </Box>
+          <Typography variant="h5" fontWeight={800} color="#003366" gutterBottom>
+            {userError.type === 'not_found' ? 'Kullanıcı Bulunamadı' : 'Servis Kullanılamıyor'}
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            {userError.type === 'not_found'
+              ? (<>Bu bilgisayar sisteme kayıtlı değil.<br />Lütfen sistem yöneticisine başvurun.</>
+              ) : 'Haftalık Rapor servisi şu an yanıt vermiyor. Lütfen daha sonra tekrar deneyin.'}
+          </Typography>
+          <Box sx={{
+            background: '#f8fafc', borderRadius: 2, px: 3, py: 1.5,
+            border: '1px solid #e2e8f0', display: 'inline-block'
+          }}>
+            <Typography variant="caption" color="text.secondary" display="block">Kullanıcı Adı</Typography>
+            <Typography variant="body2" fontWeight={700} fontFamily="monospace" color="#003366">
+              {userError.windowName}
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{ minHeight: '100vh', background: 'linear-gradient(160deg, #e8f4fb 0%, #f0fafd 100%)' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'linear-gradient(160deg, #e8f4fb 0%, #f0fafd 100%)' }}>
 
       {/* ── HEADER (full width) ── */}
       <Box
         sx={{
-          px: 5,
-          py: '28px',
+          px: { xs: 2, sm: 3, md: 5 },
+          py: { xs: '14px', md: '28px' },
           background: '#00447F',
           color: 'white',
           display: 'flex',
@@ -394,23 +509,23 @@ function App() {
         <Box sx={{ position: 'absolute', right: -40, top: -40, width: 220, height: 220, borderRadius: '50%', background: 'rgba(255,255,255,0.07)' }} />
         <Box sx={{ position: 'absolute', right: 100, bottom: -70, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          {/* BBVA Logo */}
+          {/* Logo */}
           <Box
             component="img"
             src="/logo.png"
-            alt="Garanti BBVA"
+            alt="Logo"
             sx={{
-              height: 65,
+              height: { xs: 36, sm: 50, md: 65 },
               width: 'auto',
             }}
           />
-          <Box sx={{ width: '1px', height: 48, background: 'rgba(255,255,255,0.3)' }} />
+          <Box sx={{ width: '1px', height: { xs: 32, md: 48 }, background: 'rgba(255,255,255,0.3)' }} />
           <Box>
-            <Typography variant="h4" fontWeight={800} letterSpacing={-0.5}>
+            <Typography variant="h4" fontWeight={800} letterSpacing={-0.5} sx={{ fontSize: { xs: '1.1rem', sm: '1.5rem', md: '2.125rem' } }}>
               Haftalık Rapor
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
-              {userData.LineName}
+              {lines.find(l => l.LineID === selectedLineId)?.LineName || userData.LineName}
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.7, lineHeight: 1.6 }}>
               {userData.DepartmentName}
@@ -419,23 +534,35 @@ function App() {
         </Box>
         <Box sx={{ textAlign: 'right', zIndex: 1 }}>
           <Box sx={{ background: 'rgba(255,255,255,0.18)', borderRadius: 3, px: 3, py: 1.5, backdropFilter: 'blur(8px)' }}>
-            <Typography variant="caption" sx={{ opacity: 0.85, display: 'block' }}>Toplam Aksiyon</Typography>
-            <Typography variant="h4" fontWeight={800}>{actions.length}</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.85, display: 'block' }}>
+              {userData.PositionNumber >= 4 ? 'Statülü Aksiyon' : 'Toplam Aksiyon'}
+            </Typography>
+            <Typography variant="h4" fontWeight={800}>
+              {userData.PositionNumber >= 4
+                ? actions.filter(a => !!actionStatuses[a.id]).length
+                : actions.length}
+            </Typography>
           </Box>
         </Box>
       </Box>
 
-      <Container maxWidth="xl" sx={{ py: 3 }}>
+      <Container maxWidth="xl" sx={{ py: 3, px: { xs: 3, sm: 4, md: 5 }, flex: 1, display: 'flex', flexDirection: 'column' }}>
 
         {/* ── TWO PANES ── */}
-        <Grid container spacing={3} sx={{ flexWrap: 'nowrap', alignItems: 'stretch' }}>
+        <Grid container spacing={3} sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: 'stretch', flex: 1, minHeight: 0 }}>
 
-          {/* LEFT PANE */}
-          <Grid item sx={{ flex: '0 0 35%', maxWidth: '35%', display: 'flex' }}>
+          {/* LEFT PANE — hidden for EVP/GM */}
+          {!(userData.PositionNumber >= 4) && <Grid item sx={{
+            flex: { xs: '0 0 100%', md: leftPanelOpen ? '0 0 30%' : '0 0 0%' },
+            maxWidth: { xs: '100%', md: leftPanelOpen ? '30%' : '0%' },
+            width: '100%', display: 'flex',
+            overflow: 'hidden',
+            transition: 'flex 0.3s ease, max-width 0.3s ease',
+          }}>
             <Card
               elevation={0}
               sx={{
-                height: '100%',
+                height: { xs: 'auto', md: '100%' },
                 width: '100%',
                 borderRadius: 4,
                 border: '1px solid',
@@ -448,17 +575,24 @@ function App() {
             >
               <Box
                 sx={{
-                  background: editingActionId
-                    ? 'linear-gradient(90deg, #1464A0, #2DCCCD)'
-                    : 'linear-gradient(90deg, #004481, #1464A0)',
+                  background: userData.PositionNumber >= 4
+                    ? 'linear-gradient(90deg, #004481, #6b7280)'
+                    : editingActionId
+                      ? 'linear-gradient(90deg, #1464A0, #2DCCCD)'
+                      : 'linear-gradient(90deg, #004481, #1464A0)',
                   borderRadius: '16px 16px 0 0',
                   px: 3, py: 2,
-                  display: 'flex', alignItems: 'center', gap: 1.5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 }}
               >
                 <Typography variant="h6" fontWeight={700} color="white">
-                  {editingActionId ? 'Aksiyonu Güncelle' : 'Yeni Aksiyon Ekle'}
+                  {userData.PositionNumber >= 4 ? 'Filtrele' : editingActionId ? 'Aksiyonu Güncelle' : 'Yeni Aksiyon Ekle'}
                 </Typography>
+                <Tooltip title="Paneli Gizle">
+                  <IconButton size="small" onClick={() => setLeftPanelOpen(false)} sx={{ color: 'rgba(255,255,255,0.8)', '&:hover': { color: 'white', background: 'rgba(255,255,255,0.15)' } }}>
+                    <ChevronLeft />
+                  </IconButton>
+                </Tooltip>
               </Box>
 
               <CardContent sx={{ px: 3, pt: 2 }}>
@@ -474,12 +608,33 @@ function App() {
                     >
                       <MenuItem value=""><em>Hafta seçin...</em></MenuItem>
                       {weeks.map((week, index) => (
-                        <MenuItem key={index} value={week}>{week}. Hafta</MenuItem>
+                        <MenuItem key={index} value={String(week.WeekNumber)}>{week.Year}/{week.WeekNumber}. Hafta</MenuItem>
                       ))}
                     </Select>
                     {errors.week && <FormHelperText>Lütfen hafta seçin</FormHelperText>}
                   </FormControl>
 
+                  {/* Line picker — only for EVP (4) and GM (5) */}
+                  {userData.PositionNumber >= 4 && (
+                    <FormControl fullWidth margin="normal">
+                      <InputLabel>Hat</InputLabel>
+                      <Select
+                        value={selectedLineId || ''}
+                        onChange={(e) => handleLineChange(e.target.value || null)}
+                        label="Hat"
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {userData.PositionNumber === 5 && (
+                          <MenuItem value=""><em>Tüm Hatlar</em></MenuItem>
+                        )}
+                        {lines.map(line => (
+                          <MenuItem key={line.LineID} value={line.LineID}>{line.LineName}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+
+                  {userData.PositionNumber < 4 && (<>
                   <FormControl fullWidth margin="normal" error={errors.type}>
                     <InputLabel>Tür</InputLabel>
                     <Select
@@ -491,7 +646,7 @@ function App() {
                     >
                       <MenuItem value=""><em>Tür seçin...</em></MenuItem>
                       {types.map((type, index) => (
-                        <MenuItem key={index} value={type}>{type}</MenuItem>
+                        <MenuItem key={index} value={type.TypeName}>{type.TypeName}</MenuItem>
                       ))}
                     </Select>
                     {errors.type && <FormHelperText>Lütfen tür seçin</FormHelperText>}
@@ -649,40 +804,60 @@ function App() {
                       İptal
                     </Button>
                   )}
+                  </>)}
                 </Box>
               </CardContent>
             </Card>
-          </Grid>
+          </Grid>}
 
           {/* RIGHT PANE */}
-          <Grid item sx={{ flex: '0 0 65%', maxWidth: '65%', display: 'flex', flexDirection: 'column' }}>
+          <Grid item sx={{ flex: { xs: '0 0 100%', md: (userData.PositionNumber >= 4 || !leftPanelOpen) ? '0 0 100%' : '0 0 70%' }, maxWidth: { xs: '100%', md: (userData.PositionNumber >= 4 || !leftPanelOpen) ? '100%' : '70%' }, width: '100%', display: 'flex', flexDirection: 'column', transition: 'flex 0.3s ease, max-width 0.3s ease', position: 'relative' }}>
 
-            {/* Durum Dağılımı — fixed vertical floating panel on right edge */}
+            {/* Re-open panel tab — only for non-EVP/GM */}
+            {!leftPanelOpen && !(userData.PositionNumber >= 4) && (
+              <Tooltip title="Formu Aç" placement="right">
+                <IconButton
+                  onClick={() => setLeftPanelOpen(true)}
+                  sx={{
+                    position: 'absolute', left: -16, top: 16, zIndex: 10,
+                    width: 32, height: 32,
+                    background: '#00447F', color: 'white',
+                    borderRadius: '0 8px 8px 0',
+                    boxShadow: '2px 2px 8px rgba(0,68,129,0.3)',
+                    '&:hover': { background: '#1464A0' }
+                  }}
+                >
+                  <ChevronRight sx={{ fontSize: 20 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+
+
+            {/* Durum Dağılımı — pull-tab sliding panel on right edge */}
             <Box
               sx={{
                 position: 'fixed',
                 right: 0,
                 top: '50%',
-                transform: 'translateY(-50%) translateX(calc(100% - 10px))',
+                transform: statusPanelOpen
+                  ? 'translateY(-50%) translateX(0)'
+                  : 'translateY(-50%) translateX(calc(100% - 10px))',
                 transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
                 zIndex: 1300,
-                '&:hover': {
-                  transform: 'translateY(-50%) translateX(0)',
-                },
               }}
             >
-              {/* Pull-tab visible edge */}
-              <Box sx={{
-                position: 'absolute',
-                left: 0,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                width: 10,
-                height: 72,
-                background: 'linear-gradient(180deg, #004481, #1464A0)',
-                borderRadius: '6px 0 0 6px',
-                boxShadow: '-2px 0 8px rgba(0,68,129,0.3)',
-              }} />
+              {/* Pull-tab */}
+              <Box
+                onClick={() => setStatusPanelOpen(o => !o)}
+                sx={{
+                  position: 'absolute', left: 0, top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 10, height: 72, cursor: 'pointer',
+                  background: 'linear-gradient(180deg, #004481, #1464A0)',
+                  borderRadius: '6px 0 0 6px',
+                  boxShadow: '-2px 0 8px rgba(0,68,129,0.3)',
+                }}
+              />
 
               {/* Panel body */}
               <Box sx={{
@@ -693,18 +868,64 @@ function App() {
                 border: '1px solid #c5dff0',
                 borderRight: 'none',
                 overflow: 'hidden',
-                minWidth: 120,
+                minWidth: 180,
               }}>
                 {/* Header */}
-                <Box sx={{ background: 'linear-gradient(135deg, #004481, #1464A0)', px: 2, py: 1.2, textAlign: 'center' }}>
+                <Box sx={{ background: 'linear-gradient(135deg, #004481, #1464A0)', px: 2, py: 1.2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Typography sx={{ fontSize: '11px', fontWeight: 700, color: 'white', letterSpacing: 0.3 }}>
                     Durum Dağılımı
                   </Typography>
+                  <IconButton size="small" onClick={() => setStatusPanelOpen(false)} sx={{ color: 'rgba(255,255,255,0.7)', p: '2px', '&:hover': { color: 'white' } }}>
+                    <ChevronRight sx={{ fontSize: 16 }} />
+                  </IconButton>
                 </Box>
+
+                {/* Filter controls inside panel */}
+                <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel sx={{ fontSize: '11px' }}>Hafta</InputLabel>
+                    <Select
+                      name="week"
+                      value={formData.week}
+                      onChange={handleInputChange}
+                      label="Hafta"
+                      sx={{ fontSize: '11px', borderRadius: 1.5 }}
+                    >
+                      <MenuItem value=""><em style={{ fontSize: '11px' }}>Seçin...</em></MenuItem>
+                      {weeks.map((week, i) => (
+                        <MenuItem key={i} value={String(week.WeekNumber)} sx={{ fontSize: '11px' }}>
+                          {week.Year}/{week.WeekNumber}. Hafta
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+
+                  {userData.PositionNumber >= 4 && (
+                    <FormControl size="small" fullWidth>
+                      <InputLabel sx={{ fontSize: '11px' }}>Line</InputLabel>
+                      <Select
+                        value={selectedLineId || ''}
+                        onChange={(e) => handleLineChange(e.target.value || null)}
+                        label="Line"
+                        sx={{ fontSize: '11px', borderRadius: 1.5 }}
+                      >
+                        {userData.PositionNumber === 5 && (
+                          <MenuItem value=""><em style={{ fontSize: '11px' }}>Tüm Hatlar</em></MenuItem>
+                        )}
+                        {lines.map(line => (
+                          <MenuItem key={line.LineID} value={line.LineID} sx={{ fontSize: '11px' }}>{line.LineName}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Box>
+
+                <Divider sx={{ mx: 1.5, borderColor: '#e8f4fb' }} />
 
                 {/* Counters — vertical */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, p: 1 }}>
-                  {/* Toplam */}
+                  {/* Toplam — hidden for EVP/GM */}
+                  {!(userData.PositionNumber >= 4) && (
                   <Box
                     onClick={() => setActiveCounterFilter(null)}
                     sx={{
@@ -721,6 +942,7 @@ function App() {
                       {(formData.week ? actions.filter(a => a.week === formData.week) : actions).length}
                     </Typography>
                   </Box>
+                  )}
 
                   {/* Status counters */}
                   {statusMeta.map(s => {
@@ -754,20 +976,22 @@ function App() {
             <Card elevation={0} sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid #c5dff0', boxShadow: '0 4px 24px rgba(0,68,129,0.08)' }}>
               <Box sx={{ background: 'linear-gradient(90deg, #004481, #1464A0)', borderRadius: '16px 16px 0 0', px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography variant="h6" fontWeight={700} color="white">Ekip Aksiyonları</Typography>
-                <Button
-                  variant={showOnlyWithStatus ? 'contained' : 'outlined'}
-                  size="small"
-                  onClick={toggleStatusFilter}
-                  startIcon={<Flag fontSize="small" />}
-                  sx={{
-                    fontSize: '12px', fontWeight: 600, borderRadius: 2,
-                    borderColor: 'rgba(255,255,255,0.6)', color: showOnlyWithStatus ? '#004481' : 'white',
-                    background: showOnlyWithStatus ? 'white' : 'rgba(255,255,255,0.15)',
-                    '&:hover': { background: showOnlyWithStatus ? '#f5f3ff' : 'rgba(255,255,255,0.25)', borderColor: 'white' }
-                  }}
-                >
-                  {showOnlyWithStatus ? 'Tümünü Göster' : 'Statülü Olanlar'}
-                </Button>
+                {!(userData.PositionNumber >= 4) && (
+                  <Button
+                    variant={showOnlyWithStatus ? 'contained' : 'outlined'}
+                    size="small"
+                    onClick={toggleStatusFilter}
+                    startIcon={<Flag fontSize="small" />}
+                    sx={{
+                      fontSize: '12px', fontWeight: 600, borderRadius: 2,
+                      borderColor: 'rgba(255,255,255,0.6)', color: showOnlyWithStatus ? '#004481' : 'white',
+                      background: showOnlyWithStatus ? 'white' : 'rgba(255,255,255,0.15)',
+                      '&:hover': { background: showOnlyWithStatus ? '#f5f3ff' : 'rgba(255,255,255,0.25)', borderColor: 'white' }
+                    }}
+                  >
+                    {showOnlyWithStatus ? 'Tümünü Göster' : 'Statülü Olanlar'}
+                  </Button>
+                )}
               </Box>
 
               <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', px: 2, pt: 2 }}>
