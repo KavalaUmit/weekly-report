@@ -1,4 +1,4 @@
-const BASE = process.env.REACT_APP_API_URL || 'http://localhost:4443';
+const BASE = (window.APP_CONFIG && window.APP_CONFIG.apiUrl) || 'http://localhost:4443';
 
 const json = async (url, init) => {
   const res = await fetch(url, init);
