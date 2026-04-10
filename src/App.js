@@ -512,7 +512,7 @@ function App() {
           {/* Logo */}
           <Box
             component="img"
-            src="/logo.png"
+            src={process.env.PUBLIC_URL + '/logo.png'}
             alt="Logo"
             sx={{
               height: { xs: 36, sm: 50, md: 65 },
