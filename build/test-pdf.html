@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Test PDF</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; margin: 0; background: #003366; }
+    button { padding: 16px 36px; font-size: 16px; background: #48c7c7; color: white;
+             border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #36b0b0; }
+  </style>
+</head>
+<body>
+<button onclick="generateTestPdf()">Test PDF Oluştur</button>
+<script>
+const { jsPDF } = window.jspdf;
+
+const STATUS_ROWS = [
+  { key: 'highlight',   label: 'Highlights',                    r: 108, g: 195, b: 108 },
+  { key: 'lowlight',    label: 'Lowlights',                     r: 230, g: 160, b:  50 },
+  { key: 'waiting',     label: 'Waiting For\nExecutive Support', r:  50, g:  80, b: 160 },
+  { key: 'information', label: 'Information',                    r:  40, g: 180, b: 180 },
+  { key: 'progress',    label: 'Progress',                      r:  16, g: 185, b: 129 },
+];
+
+const SAMPLE_DATA = {
+  highlight:   ['Yeni mimari platform basariyla devreye alindi.', 'CI/CD pipeline entegrasyonu tamamlandi.'],
+  lowlight:    ['Test ortamindaki performans sorunlari devam etmektedir.'],
+  waiting:     ['Sunucu lisans yenilemesi yonetici onayi bekliyor.'],
+  information: ['Q2 planlama toplantisi 22 Nisan tarihinde yapilacak.', 'Yeni takim uyesi 15 Nisan\'da basladi.'],
+  progress:    [],
+};
+
+function getNextMonday(weekNum, year) {
+  const jan1 = new Date(year, 0, 1);
+  const d = jan1.getDay();
+  const toMon = d === 0 ? 1 : d === 1 ? 0 : 8 - d;
+  const w1Mon = new Date(year, 0, 1 + toMon);
+  const next = new Date(w1Mon);
+  next.setDate(w1Mon.getDate() + weekNum * 7);
+  return next;
+}
+
+function fmtDate(d) {
+  return String(d.getDate()).padStart(2,'0') + '.' +
+         String(d.getMonth()+1).padStart(2,'0') + '.' + d.getFullYear();
+}
+
+async function loadFontBase64(url) {
+  const res   = await fetch(url);
+  const buf   = await res.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+async function generateTestPdf() {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  // Load Calibri
+  try {
+    const [reg, bold] = await Promise.all([
+      loadFontBase64('/weeklyreport/calibri.ttf'),
+      loadFontBase64('/weeklyreport/calibrib.ttf'),
+    ]);
+    doc.addFileToVFS('calibri.ttf',  reg);
+    doc.addFileToVFS('calibrib.ttf', bold);
+    doc.addFont('calibri.ttf',  'Calibri', 'normal');
+    doc.addFont('calibrib.ttf', 'Calibri', 'bold');
+  } catch(e) { console.warn('Calibri could not be loaded, using helvetica.', e); }
+
+  const pageW = 210, pageH = 297, mL = 15, mR = 15;
+  const cW    = pageW - mL - mR;
+  const hY = 15, hH = 28;
+  const tealW = cW * 0.55;
+  const rightW = cW - tealW;
+
+  // Teal left block
+  doc.setFillColor(72, 199, 199);
+  doc.rect(mL, hY, tealW, hH, 'F');
+
+  // White right block
+  doc.setFillColor(255, 255, 255);
+  doc.rect(mL + tealW, hY, rightW, hH, 'F');
+
+  const weekNum = 15, weekYear = 2026;
+  const nextMon = getNextMonday(weekNum, weekYear);
+
+  // Line 1
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('Calibri', 'bold');
+  doc.setFontSize(14);
+  doc.text('Is Surec Platformlari Haftalik Raporu', mL + 5, hY + 11);
+
+  // Line 2
+  doc.setFont('Calibri', 'normal');
+  doc.setFontSize(14);
+  doc.text(`${weekNum}. Hafta | ${fmtDate(nextMon)}`, mL + 5, hY + 22);
+
+  // Header border
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.3);
+  doc.rect(mL, hY, cW, hH);
+  doc.line(mL + tealW, hY, mL + tealW, hY + hH);
+
+  // Table rows
+  const leftCW = 45, rightCW = cW - leftCW;
+  const minH = 32, padX = 4, padY = 4;
+  let curY = hY + hH;
+
+  for (const row of STATUS_ROWS) {
+    const bullets = (SAMPLE_DATA[row.key] || []).map(t => '• ' + t);
+    if (bullets.length === 0) continue;
+
+    doc.setFont('Calibri', 'normal');
+    doc.setFontSize(9);
+    const allWrapped = [];
+    bullets.forEach(b => {
+      const w = doc.splitTextToSize(b, rightCW - padX * 2);
+      allWrapped.push(...w);
+    });
+    const rowH = Math.max(minH, allWrapped.length * 5 + padY * 2 + 4);
+
+    if (curY + rowH > pageH - 15) { doc.addPage(); curY = 15; }
+
+    doc.setFillColor(251, 252, 255);
+    doc.rect(mL, curY, cW, rowH, 'F');
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.3);
+    doc.rect(mL, curY, cW, rowH);
+    doc.line(mL + leftCW, curY, mL + leftCW, curY + rowH);
+
+    // Circle
+    const cx = mL + leftCW / 2, cy = curY + rowH / 2 - 5, cr = 9;
+    doc.setFillColor(row.r, row.g, row.b);
+    doc.circle(cx, cy, cr, 'F');
+
+    // Label
+    doc.setTextColor(60, 60, 60);
+    doc.setFont('Calibri', 'bold');
+    doc.setFontSize(7);
+    row.label.split('\n').forEach((p, i) =>
+      doc.text(p, cx, cy + cr + 4 + i * 4, { align: 'center' }));
+
+    // Text
+    doc.setTextColor(30, 30, 30);
+    doc.setFont('Calibri', 'normal');
+    doc.setFontSize(9);
+    doc.text(allWrapped, mL + leftCW + padX, curY + padY + 5);
+
+    curY += rowH;
+  }
+
+  // Bottom line + footer
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.4);
+  doc.line(mL, curY, mL + cW, curY);
+
+  doc.setFont('Calibri', 'italic');
+  doc.setFontSize(7);
+  doc.setTextColor(160, 160, 160);
+  doc.text('Olusturulma tarihi: ' + fmtDate(new Date()), mL, pageH - 8);
+  doc.text('UMIT KAVALA', pageW - mR, pageH - 8, { align: 'right' });
+
+  doc.save('Test_Haftalik_Rapor_H15.pdf');
+}
+</script>
+</body>
+</html>

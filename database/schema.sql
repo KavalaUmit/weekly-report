@@ -43,7 +43,7 @@ CREATE TABLE tbl_weekly_report_Departments (
 -- -------------------------------------------------------------
 CREATE TABLE tbl_weekly_report_Users (
     UserID          INT             IDENTITY(1,1) PRIMARY KEY,
-    WindowName      NVARCHAR(256)   NOT NULL UNIQUE,
+    WindowsName      NVARCHAR(256)   NOT NULL UNIQUE,
     FullName        NVARCHAR(256)   NOT NULL,
     DepartmentID    INT             NULL REFERENCES tbl_weekly_report_Departments(DepartmentID),
     LineID          INT             NULL REFERENCES tbl_weekly_report_Lines(LineID),
@@ -284,7 +284,7 @@ SELECT
 FROM tbl_weekly_report_Actions a
 JOIN tbl_weekly_report_Weeks w ON w.WeekID = a.WeekID
 JOIN tbl_weekly_report_Users u ON u.UserID = a.UserID
-WHERE u.WindowName = 'HaftalikRapor'   -- replace with actual windowName
+WHERE u.WindowsName = 'HaftalikRapor'   -- replace with actual windowName
   AND a.IsDeleted  = 0
 GROUP BY w.WeekNumber, w.Year
 ORDER BY w.Year, w.WeekNumber;

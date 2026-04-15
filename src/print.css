@@ -1,0 +1,28 @@
+@media print {
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Show only the actions card and its children */
+  .print-section,
+  .print-section * {
+    visibility: visible;
+  }
+
+  /* Position it at the top-left of the page */
+  .print-section {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* Hide the PDF and filter buttons inside the print area */
+  .no-print {
+    display: none !important;
+  }
+}

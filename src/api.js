@@ -1,7 +1,9 @@
 const BASE = (window.APP_CONFIG && window.APP_CONFIG.apiUrl) || 'http://localhost:4443';
 
+const defaultInit = { credentials: 'include' };
+
 const json = async (url, init) => {
-  const res = await fetch(url, init);
+  const res = await fetch(url, { ...defaultInit, ...init });
   if (!res.ok) {
     const err = new Error(res.statusText);
     err.status = res.status;
@@ -12,26 +14,33 @@ const json = async (url, init) => {
 };
 
 const post = (url, body) => json(url, {
+  credentials: 'include',
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body)
 });
 
 const put = (url, body) => json(url, {
+  credentials: 'include',
   method: 'PUT',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body)
 });
 
 const patch = (url, body) => json(url, {
+  credentials: 'include',
   method: 'PATCH',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body)
 });
 
+// GET /api/users/me – backend resolves identity via Windows Authentication
+export const getMe = () =>
+  fetch(`${BASE}/api/users/me`, { credentials: 'include' });
+
 // Returns raw Response so caller can inspect status codes (404 vs other errors)
 export const getUser = (windowName) =>
-  fetch(`${BASE}/api/users/windowname/${encodeURIComponent(windowName)}`);
+  fetch(`${BASE}/api/users/windowname/${encodeURIComponent(windowName)}`, { credentials: 'include' });
 
 export const getWeeks = (year) =>
   json(`${BASE}/api/weeks?year=${year}`);

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import './print.css';
+import { generatePdf } from './generatePdf';
 import * as api from './api';
 import {
   Container,
@@ -39,7 +41,8 @@ import {
   Add,
   InsertPhoto,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  PictureAsPdf
 } from '@mui/icons-material';
 
 function App() {
@@ -88,16 +91,17 @@ function App() {
   const dateInputRef = useRef(null);
 
   useEffect(() => {
-    // Fetch user data from REST service
-    const windowName = window.name || process.env.REACT_APP_WINDOW_NAME || window.location.hostname;
-    api.getUser(windowName)
+    // Fetch user data via Windows Authentication – backend reads User.Identity.Name
+    api.getMe()
       .then(res => {
         if (res.status === 404) {
-          setUserError({ type: 'not_found', windowName });
-          throw new Error('not_found');
+          return res.json().then(body => {
+            setUserError({ type: 'not_found', windowName: body.WindowsName || body.ShortName || '' });
+            throw new Error('not_found');
+          });
         }
         if (!res.ok) {
-          setUserError({ type: 'service_unavailable', windowName });
+          setUserError({ type: 'service_unavailable', windowName: '' });
           throw new Error('service_unavailable');
         }
         return res.json();
@@ -401,6 +405,8 @@ function App() {
     });
   };
 
+  const handlePrint = () => generatePdf({ actions, actionStatuses, userData, weeks, formData }).catch(console.error);
+
   const toggleStatusFilter = () => {
     setShowOnlyWithStatus(prev => !prev);
   };
@@ -467,11 +473,11 @@ function App() {
           <Typography variant="h5" fontWeight={800} color="#003366" gutterBottom>
             {userError.type === 'not_found' ? 'Kullanıcı Bulunamadı' : 'Servis Kullanılamıyor'}
           </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-            {userError.type === 'not_found'
-              ? (<>Bu bilgisayar sisteme kayıtlı değil.<br />Lütfen sistem yöneticisine başvurun.</>
-              ) : 'Haftalık Rapor servisi şu an yanıt vermiyor. Lütfen daha sonra tekrar deneyin.'}
-          </Typography>
+          {userError.type !== 'not_found' && (
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+              Haftalık Rapor servisi şu an yanıt vermiyor. Lütfen daha sonra tekrar deneyin.
+            </Typography>
+          )}
           <Box sx={{
             background: '#f8fafc', borderRadius: 2, px: 3, py: 1.5,
             border: '1px solid #e2e8f0', display: 'inline-block'
@@ -973,25 +979,42 @@ function App() {
             </Box>
 
             {/* Ekip Aksiyonları */}
-            <Card elevation={0} sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid #c5dff0', boxShadow: '0 4px 24px rgba(0,68,129,0.08)' }}>
+            <Card elevation={0} className="print-section" sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid #c5dff0', boxShadow: '0 4px 24px rgba(0,68,129,0.08)' }}>
               <Box sx={{ background: 'linear-gradient(90deg, #004481, #1464A0)', borderRadius: '16px 16px 0 0', px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography variant="h6" fontWeight={700} color="white">Ekip Aksiyonları</Typography>
-                {!(userData.PositionNumber >= 4) && (
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  {!(userData.PositionNumber >= 4) && (
+                    <Button
+                      variant={showOnlyWithStatus ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={toggleStatusFilter}
+                      startIcon={<Flag fontSize="small" />}
+                      sx={{
+                        fontSize: '12px', fontWeight: 600, borderRadius: 2, minWidth: 160,
+                        borderColor: 'rgba(255,255,255,0.6)', color: showOnlyWithStatus ? '#004481' : 'white',
+                        background: showOnlyWithStatus ? 'white' : 'rgba(255,255,255,0.15)',
+                        '&:hover': { background: showOnlyWithStatus ? '#f5f3ff' : 'rgba(255,255,255,0.25)', borderColor: 'white' }
+                      }}
+                    >
+                      {showOnlyWithStatus ? 'Tümünü Göster' : 'Rapora Eklenenler'}
+                    </Button>
+                  )}
                   <Button
-                    variant={showOnlyWithStatus ? 'contained' : 'outlined'}
+                    variant="outlined"
                     size="small"
-                    onClick={toggleStatusFilter}
-                    startIcon={<Flag fontSize="small" />}
+                    onClick={handlePrint}
+                    startIcon={<PictureAsPdf fontSize="small" />}
+                    className="no-print"
                     sx={{
-                      fontSize: '12px', fontWeight: 600, borderRadius: 2,
-                      borderColor: 'rgba(255,255,255,0.6)', color: showOnlyWithStatus ? '#004481' : 'white',
-                      background: showOnlyWithStatus ? 'white' : 'rgba(255,255,255,0.15)',
-                      '&:hover': { background: showOnlyWithStatus ? '#f5f3ff' : 'rgba(255,255,255,0.25)', borderColor: 'white' }
+                      fontSize: '12px', fontWeight: 600, borderRadius: 2, minWidth: 160,
+                      borderColor: 'rgba(255,255,255,0.6)', color: 'white',
+                      background: 'rgba(255,255,255,0.15)',
+                      '&:hover': { background: 'rgba(255,255,255,0.25)', borderColor: 'white' }
                     }}
                   >
-                    {showOnlyWithStatus ? 'Tümünü Göster' : 'Statülü Olanlar'}
+                    PDF'e Çevir
                   </Button>
-                )}
+                </Box>
               </Box>
 
               <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', px: 2, pt: 2 }}>
