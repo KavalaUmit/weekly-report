@@ -148,30 +148,38 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
 
   let curY = hY + hH;
 
-  for (const row of STATUS_ROWS) {
-    // Collect status-matching actions (excluding images)
-    const matched = actions.filter(a => actionStatuses[a.id] === row.key);
-    if (matched.length === 0) continue;
+  const lineH    = 5;   // mm per text line
+  const headerH  = 6;   // mm per type-header line
+  const groupGap = 3;   // mm gap between type groups
+  const maxTextW = rightCW - padX * 2;
 
-    // Build bullet lines for right cell
-    const bullets = [];
+  for (const row of STATUS_ROWS) {
+    // Collect status-matching actions
+    const matched = actions.filter(a => actionStatuses[a.id] === row.key);
+
+    // Group by Tür (type), preserving insertion order
+    const byType = {};
     matched.forEach(a => {
+      const typeName = a.type || '';
+      if (!byType[typeName]) byType[typeName] = [];
       (a.actionItems || [])
         .filter(i => i.type === 'text' && i.value && i.value.trim())
-        .forEach(i => bullets.push('• ' + i.value.trim()));
+        .forEach(i => byType[typeName].push(i.value.trim()));
+    });
+    const typeGroups = Object.entries(byType);
+
+    // Measure total right-cell height
+    doc.setFontSize(9);
+    let contentH = 0;
+    typeGroups.forEach(([typeName, bullets], gi) => {
+      if (typeName) contentH += headerH;
+      bullets.forEach(b => {
+        contentH += doc.splitTextToSize('• ' + b, maxTextW).length * lineH;
+      });
+      if (gi < typeGroups.length - 1) contentH += groupGap;
     });
 
-    // Measure wrapped text height
-    doc.setFontSize(9);
-    const maxTextW = rightCW - padX * 2;
-    const allWrapped = [];
-    bullets.forEach(b => {
-      const wrapped = doc.splitTextToSize(b, maxTextW);
-      allWrapped.push(...wrapped);
-    });
-    const lineH = 5;
-    const textBlockH = allWrapped.length * lineH;
-    const rowH = Math.max(minH, textBlockH + padY * 2 + 4);
+    const rowH = Math.max(minH, contentH + padY * 2 + 4);
 
     // Page break check
     if (curY + rowH > pageH - 15) {
@@ -179,7 +187,7 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       curY = 15;
     }
 
-    // Row background (alternating subtle)
+    // Row background
     doc.setFillColor(251, 252, 255);
     doc.rect(mL, curY, cW, rowH, 'F');
 
@@ -189,7 +197,7 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
     doc.rect(mL, curY, cW, rowH);
     doc.line(mL + leftCW, curY, mL + leftCW, curY + rowH);
 
-    // Colored circle (or icon) in left cell
+    // Icon / circle in left cell
     const cx = mL + leftCW / 2;
     const cy = curY + rowH / 2 - 5;
     const cr = 9;
@@ -202,7 +210,7 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       doc.circle(cx, cy, cr, 'F');
     }
 
-    // Status label below circle
+    // Status label below icon
     doc.setTextColor(60, 60, 60);
     doc.setFont('Calibri', 'bold');
     doc.setFontSize(7);
@@ -211,11 +219,28 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       doc.text(part, cx, cy + cr + 4 + i * 4, { align: 'center' });
     });
 
-    // Action texts in right cell
-    doc.setTextColor(30, 30, 30);
-    doc.setFont('Calibri', 'normal');
-    doc.setFontSize(9);
-    doc.text(allWrapped, mL + leftCW + padX, curY + padY + 5);
+    // Right cell — grouped by Tür
+    let textY = curY + padY + 5;
+    typeGroups.forEach(([typeName, bullets], gi) => {
+      // Type header (bold)
+      if (typeName) {
+        doc.setFont('Calibri', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(30, 30, 30);
+        doc.text(typeName, mL + leftCW + padX, textY);
+        textY += headerH;
+      }
+      // Bullet items
+      doc.setFont('Calibri', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(50, 50, 50);
+      bullets.forEach(b => {
+        const wrapped = doc.splitTextToSize('• ' + b, maxTextW);
+        doc.text(wrapped, mL + leftCW + padX, textY);
+        textY += wrapped.length * lineH;
+      });
+      if (gi < typeGroups.length - 1) textY += groupGap;
+    });
 
     curY += rowH;
   }
