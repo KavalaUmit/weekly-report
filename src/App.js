@@ -530,9 +530,16 @@ function App() {
             <Typography variant="h4" fontWeight={800} letterSpacing={-0.5} sx={{ fontSize: { xs: '1.1rem', sm: '1.5rem', md: '2.125rem' } }}>
               Haftalık Rapor
             </Typography>
-            <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
-              {lines.find(l => l.LineID === selectedLineId)?.LineName || userData.LineName}
-            </Typography>
+            {userData.PositionNumber < 4 && (
+              <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
+                {userData.UnitName}
+              </Typography>
+            )}
+            {userData.PositionNumber === 4 && (
+              <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
+                {lines.find(l => l.LineID === selectedLineId)?.LineName || userData.LineName}
+              </Typography>
+            )}
             <Typography variant="body2" sx={{ opacity: 0.7, lineHeight: 1.6 }}>
               {userData.DepartmentName}
             </Typography>
@@ -577,6 +584,8 @@ function App() {
                   ? '0 4px 24px rgba(45,204,205,0.18)'
                   : '0 4px 24px rgba(0,68,129,0.08)',
                 transition: 'box-shadow 0.3s, border-color 0.3s',
+                display: 'flex',
+                flexDirection: 'column',
               }}
             >
               <Box
@@ -601,8 +610,8 @@ function App() {
                 </Tooltip>
               </Box>
 
-              <CardContent sx={{ px: 3, pt: 2 }}>
-                <Box component="form" onSubmit={handleSubmit}>
+              <CardContent sx={{ px: 3, pt: 2, pb: 2, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto', '&:last-child': { pb: 2 } }}>
+                <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                   <FormControl fullWidth margin="normal" error={errors.week}>
                     <InputLabel>Hafta</InputLabel>
                     <Select
@@ -673,20 +682,24 @@ function App() {
                     }}
                   />
 
-                  <Box sx={{ mt: 1 }}>
+                  <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', flex: 1 }}>
                     <Typography variant="caption" sx={{ color: errors.action ? '#d32f2f' : '#666', fontWeight: 600, mb: 0.5, display: 'block' }}>
                       Aksiyon {errors.action && '— En az bir aksiyon gerekli'}
                     </Typography>
 
                     {/* Main action — text only */}
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 1, mb: 1, flex: 1 }}>
                       <TextField
-                        fullWidth multiline rows={2}
+                        fullWidth multiline
                         value={formData.actionItems[0]?.value ?? ''}
                         onChange={(e) => handleActionItemChange(0, e.target.value)}
                         error={errors.action}
                         placeholder="Aksiyon detayını yazın..."
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                        sx={{
+                          flex: 1,
+                          '& .MuiOutlinedInput-root': { borderRadius: 2, height: '100%', alignItems: 'flex-start' },
+                          '& .MuiInputBase-input': { height: '100% !important', overflow: 'auto !important', boxSizing: 'border-box' },
+                        }}
                       />
                     </Box>
 

@@ -35,6 +35,22 @@ async function loadFontBase64(url) {
   return btoa(binary);
 }
 
+function loadIconAsPng(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.naturalWidth  || 64;
+      canvas.height = img.naturalHeight || 64;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 export async function generatePdf({ actions, actionStatuses, userData, weeks, formData }) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
@@ -51,6 +67,17 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   } catch (_) {
     // fallback to helvetica if fonts can't be loaded
   }
+
+  // ─── LOAD ICONS (converted to PNG via canvas) ─────────────────────────────
+  const [highlightIconB64, lowlightIconB64, informationIconB64, waitingIconB64, progressIconB64, headerLogoPng] =
+    await Promise.all([
+      loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/highlight-icon.png'),
+      loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/lowlight-icon.png'),
+      loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/information-icon.png'),
+      loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/waiting-icon.png'),
+      loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/progress-icon.png'),
+      loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/pdf-logo.png'),
+    ]);
 
   const pageW  = 210;
   const pageH  = 297;
@@ -71,6 +98,21 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   // White right block
   doc.setFillColor(255, 255, 255);
   doc.rect(mL + tealW, hY, rightW, hH, 'F');
+
+  // Logo in right block — scaled to fit with padding
+  if (headerLogoPng) {
+    const logoMaxH = hH - 6;
+    const logoMaxW = rightW - 8;
+    const img = new Image();
+    img.src = headerLogoPng;
+    const ratio = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
+    let logoW = logoMaxW;
+    let logoH = logoW / ratio;
+    if (logoH > logoMaxH) { logoH = logoMaxH; logoW = logoH * ratio; }
+    const logoX = mL + tealW + (rightW - logoW) / 2;
+    const logoY = hY + (hH - logoH) / 2;
+    doc.addImage(headerLogoPng, 'PNG', logoX, logoY, logoW, logoH);
+  }
 
   // Week data
   const weekObj   = weeks.find(w => String(w.WeekNumber) === String(formData.week));
@@ -147,12 +189,18 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
     doc.rect(mL, curY, cW, rowH);
     doc.line(mL + leftCW, curY, mL + leftCW, curY + rowH);
 
-    // Colored circle in left cell
+    // Colored circle (or icon) in left cell
     const cx = mL + leftCW / 2;
     const cy = curY + rowH / 2 - 5;
     const cr = 9;
-    doc.setFillColor(row.r, row.g, row.b);
-    doc.circle(cx, cy, cr, 'F');
+    const iconDataUrlMap = { highlight: highlightIconB64, lowlight: lowlightIconB64, information: informationIconB64, waiting: waitingIconB64, progress: progressIconB64 };
+    const iconDataUrl = iconDataUrlMap[row.key];
+    if (iconDataUrl) {
+      doc.addImage(iconDataUrl, 'PNG', cx - cr, cy - cr, cr * 2, cr * 2);
+    } else {
+      doc.setFillColor(row.r, row.g, row.b);
+      doc.circle(cx, cy, cr, 'F');
+    }
 
     // Status label below circle
     doc.setTextColor(60, 60, 60);
