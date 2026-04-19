@@ -89,6 +89,8 @@ function App() {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const dateInputRef = useRef(null);
+  const editableRef = useRef(null);
+  const subEditableRefs = useRef({});
 
   useEffect(() => {
     // Fetch user data via Windows Authentication – backend reads User.Identity.Name
@@ -192,6 +194,9 @@ function App() {
             id: a.ActionID,
             week: String(a.WeekNumber),
             type: a.TypeName,
+            typeHeader: a.TypeHeader ?? '',
+            includeDate: !!a.IncludeDate,
+            typeSortOrder: a.TypeSortOrder ?? 0,
             date: a.ActionDate ? a.ActionDate.split('T')[0] : '',
             actionItems: items.map(i => ({ type: i.ItemType, value: i.ItemValue })),
             timestamp: new Date(a.CreatedAt).toLocaleString('tr-TR'),
@@ -236,10 +241,12 @@ function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    const selectedType = types.find(t => t.TypeName === formData.type);
+    const showDate = !formData.type || selectedType?.IncludeDate !== false;
     const newErrors = {
       week: !formData.week,
       type: !formData.type,
-      date: !formData.date,
+      date: showDate && !formData.date,
       action: !formData.actionItems.some(a => a.type === 'image' ? !!a.value : a.value.trim())
     };
     setErrors(newErrors);
@@ -279,6 +286,7 @@ function App() {
     setEditingActionId(null);
     setFormData({ week: formData.week, type: '', date: '', actionItems: [{ type: 'text', value: '' }] });
     setErrors({ week: false, type: false, date: false, action: false });
+    if (editableRef.current) editableRef.current.innerHTML = '';
   };
 
   const handleActionItemChange = (index, value) => {
@@ -307,6 +315,63 @@ function App() {
     };
     reader.readAsDataURL(file);
   };
+
+  const markersToHtml = (text) =>
+    (text || '').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+
+  const htmlToMarkers = (html) =>
+    html
+      .replace(/<strong>([\s\S]*?)<\/strong>/gi, '**$1**')
+      .replace(/<b>([\s\S]*?)<\/b>/gi, '**$1**')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/<[^>]+>/g, '');
+
+  const renderBoldText = (text) => {
+    if (!text || !text.includes('**')) return text;
+    return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+      part.startsWith('**') && part.endsWith('**')
+        ? <strong key={i}>{part.slice(2, -2)}</strong>
+        : part
+    );
+  };
+
+  const handleBold = () => {
+    const el = editableRef.current;
+    if (!el) return;
+    el.focus();
+    document.execCommand('bold', false, null);
+    setTimeout(() => handleActionItemChange(0, htmlToMarkers(el.innerHTML)), 0);
+  };
+
+  const handleSubBold = (index) => {
+    const el = subEditableRefs.current[index];
+    if (!el) return;
+    el.focus();
+    document.execCommand('bold', false, null);
+    setTimeout(() => handleActionItemChange(index, htmlToMarkers(el.innerHTML)), 0);
+  };
+
+  const handleContentInput = (e) => {
+    handleActionItemChange(0, htmlToMarkers(e.currentTarget.innerHTML));
+  };
+
+  const handleContentPaste = (e) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  };
+
+  useEffect(() => {
+    if (editableRef.current) {
+      editableRef.current.innerHTML = markersToHtml(formData.actionItems[0]?.value ?? '');
+    }
+    formData.actionItems.slice(1).forEach((item, i) => {
+      const el = subEditableRefs.current[i + 1];
+      if (el && item.type === 'text') el.innerHTML = markersToHtml(item.value ?? '');
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingActionId]);
 
   const handleRemoveActionItem = (index) => {
     setFormData(prev => {
@@ -530,7 +595,17 @@ function App() {
             <Typography variant="h4" fontWeight={800} letterSpacing={-0.5} sx={{ fontSize: { xs: '1.1rem', sm: '1.5rem', md: '2.125rem' } }}>
               Haftalık Rapor
             </Typography>
-            {userData.PositionNumber < 4 && (
+            {(userData.PositionNumber === 1 || userData.PositionNumber === 2) && (
+              <>
+                <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
+                  {userData.UnitName}
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.75, lineHeight: 1.6 }}>
+                  {userData.DepartmentName}
+                </Typography>
+              </>
+            )}
+            {userData.PositionNumber === 3 && (
               <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
                 {userData.UnitName}
               </Typography>
@@ -540,9 +615,6 @@ function App() {
                 {lines.find(l => l.LineID === selectedLineId)?.LineName || userData.LineName}
               </Typography>
             )}
-            <Typography variant="body2" sx={{ opacity: 0.7, lineHeight: 1.6 }}>
-              {userData.DepartmentName}
-            </Typography>
           </Box>
         </Box>
         <Box sx={{ textAlign: 'right', zIndex: 1 }}>
@@ -562,7 +634,7 @@ function App() {
       <Container maxWidth="xl" sx={{ py: 3, px: { xs: 3, sm: 4, md: 5 }, flex: 1, display: 'flex', flexDirection: 'column' }}>
 
         {/* ── TWO PANES ── */}
-        <Grid container spacing={3} sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: 'stretch', flex: 1, minHeight: 0 }}>
+        <Grid container spacing={3} sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: 'flex-start', flex: 1, minHeight: 0 }}>
 
           {/* LEFT PANE — hidden for EVP/GM */}
           {!(userData.PositionNumber >= 4) && <Grid item sx={{
@@ -575,7 +647,7 @@ function App() {
             <Card
               elevation={0}
               sx={{
-                height: { xs: 'auto', md: '100%' },
+                height: 'auto',
                 width: '100%',
                 borderRadius: 4,
                 border: '1px solid',
@@ -610,8 +682,8 @@ function App() {
                 </Tooltip>
               </Box>
 
-              <CardContent sx={{ px: 3, pt: 2, pb: 2, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto', '&:last-child': { pb: 2 } }}>
-                <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+              <CardContent sx={{ px: 3, pt: 2, pb: 2, display: 'flex', flexDirection: 'column', '&:last-child': { pb: 2 } }}>
+                <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column' }}>
                   <FormControl fullWidth margin="normal" error={errors.week}>
                     <InputLabel>Hafta</InputLabel>
                     <Select
@@ -667,6 +739,7 @@ function App() {
                     {errors.type && <FormHelperText>Lütfen tür seçin</FormHelperText>}
                   </FormControl>
 
+                  {(types.find(t => t.TypeName === formData.type)?.IncludeDate !== false || !formData.type) && (
                   <TextField
                     fullWidth margin="normal" type="date" name="date"
                     label="Tarih" value={formData.date} onChange={handleInputChange}
@@ -681,24 +754,50 @@ function App() {
                       )
                     }}
                   />
+                  )}
 
-                  <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', flex: 1 }}>
-                    <Typography variant="caption" sx={{ color: errors.action ? '#d32f2f' : '#666', fontWeight: 600, mb: 0.5, display: 'block' }}>
-                      Aksiyon {errors.action && '— En az bir aksiyon gerekli'}
-                    </Typography>
+                  <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                      <Typography variant="caption" sx={{ color: errors.action ? '#d32f2f' : '#666', fontWeight: 600 }}>
+                        Aksiyon {errors.action && '— En az bir aksiyon gerekli'}
+                      </Typography>
+                      <Tooltip title="Seçili metni kalın yap">
+                        <IconButton
+                          size="small"
+                          onMouseDown={(e) => { e.preventDefault(); handleBold(); }}
+                          sx={{ ml: 'auto', fontWeight: 900, width: 26, height: 26, fontSize: '13px', lineHeight: 1, color: '#1464A0', border: '1px solid #c5dff0', borderRadius: 1, '&:hover': { background: '#e8f4fb', borderColor: '#1464A0' } }}
+                        >
+                          B
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
 
-                    {/* Main action — text only */}
-                    <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 1, mb: 1, flex: 1 }}>
-                      <TextField
-                        fullWidth multiline
-                        value={formData.actionItems[0]?.value ?? ''}
-                        onChange={(e) => handleActionItemChange(0, e.target.value)}
-                        error={errors.action}
-                        placeholder="Aksiyon detayını yazın..."
+                    {/* Main action — contentEditable for inline bold */}
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                      <Box
+                        ref={editableRef}
+                        contentEditable
+                        suppressContentEditableWarning
+                        onInput={handleContentInput}
+                        onPaste={handleContentPaste}
                         sx={{
                           flex: 1,
-                          '& .MuiOutlinedInput-root': { borderRadius: 2, height: '100%', alignItems: 'flex-start' },
-                          '& .MuiInputBase-input': { height: '100% !important', overflow: 'auto !important', boxSizing: 'border-box' },
+                          minHeight: 130,
+                          border: errors.action ? '1px solid #d32f2f' : '1px solid rgba(0,0,0,0.23)',
+                          borderRadius: 2,
+                          px: '14px', py: '12px',
+                          outline: 'none',
+                          fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
+                          fontSize: '1rem',
+                          lineHeight: 1.6,
+                          color: 'rgba(0,0,0,0.87)',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflowY: 'auto',
+                          cursor: 'text',
+                          '&:focus': { borderColor: errors.action ? '#d32f2f' : '#1464A0', borderWidth: '2px', px: '13px', py: '11px' },
+                          '& strong, & b': { fontWeight: 700 },
+                          '&:empty::before': { content: '"Aksiyon detayını yazın..."', color: 'rgba(0,0,0,0.42)', pointerEvents: 'none' },
                         }}
                       />
                     </Box>
@@ -749,21 +848,52 @@ function App() {
                               )}
                             </Box>
                           ) : (
-                            <TextField
-                              fullWidth multiline rows={2}
-                              value={item.value}
-                              onChange={(e) => handleActionItemChange(index, e.target.value)}
-                              placeholder="Alt aksiyon detayı..."
-                              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                            <Box
+                              ref={el => { subEditableRefs.current[index] = el; }}
+                              contentEditable
+                              suppressContentEditableWarning
+                              onInput={(e) => handleActionItemChange(index, htmlToMarkers(e.currentTarget.innerHTML))}
+                              onPaste={(e) => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); }}
+                              sx={{
+                                flex: 1,
+                                minHeight: 52,
+                                border: '1px solid rgba(0,0,0,0.23)',
+                                borderRadius: 2,
+                                px: '12px', py: '9px',
+                                outline: 'none',
+                                fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
+                                fontSize: '0.95rem',
+                                lineHeight: 1.5,
+                                color: 'rgba(0,0,0,0.87)',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                cursor: 'text',
+                                '&:focus': { borderColor: '#1464A0', borderWidth: '2px', px: '11px', py: '8px' },
+                                '& strong, & b': { fontWeight: 700 },
+                                '&:empty::before': { content: '"Alt aksiyon detayı..."', color: 'rgba(0,0,0,0.42)', pointerEvents: 'none' },
+                              }}
                             />
                           )}
-                          <IconButton
-                            onClick={() => handleRemoveActionItem(index)}
-                            sx={{ mt: 0.5, color: '#ef4444', '&:hover': { background: '#fef2f2' } }}
-                            size="small"
-                          >
-                            <Delete fontSize="small" />
-                          </IconButton>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                            {item.type !== 'image' && (
+                              <Tooltip title="Seçili metni kalın yap">
+                                <IconButton
+                                  size="small"
+                                  onMouseDown={(e) => { e.preventDefault(); handleSubBold(index); }}
+                                  sx={{ width: 26, height: 26, border: '1px solid #c5dff0', borderRadius: 1, color: '#1464A0', fontWeight: 700, fontSize: '13px', lineHeight: 1 }}
+                                >
+                                  <b>B</b>
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            <IconButton
+                              onClick={() => handleRemoveActionItem(index)}
+                              sx={{ color: '#ef4444', '&:hover': { background: '#fef2f2' } }}
+                              size="small"
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Box>
                         </Box>
                       );
                     })}
@@ -1042,9 +1172,15 @@ function App() {
                 ) : (
                   <List disablePadding>
                     {Object.entries(groupedActions).map(([week, weekActions]) => {
-                      const filteredWeekActions = activeCounterFilter
+                      const statusOrder = ['highlight', 'lowlight', 'waiting', 'information', 'progress'];
+                      const filteredWeekActions = (activeCounterFilter
                         ? weekActions.filter(a => actionStatuses[a.id] === activeCounterFilter)
-                        : weekActions;
+                        : weekActions
+                      ).slice().sort((a, b) => {
+                        const ai = statusOrder.indexOf(actionStatuses[a.id] || '');
+                        const bi = statusOrder.indexOf(actionStatuses[b.id] || '');
+                        return (ai === -1 ? statusOrder.length : ai) - (bi === -1 ? statusOrder.length : bi);
+                      });
                       if (filteredWeekActions.length === 0) return null;
                       return (
                       <Box key={week} sx={{ mb: 1 }}>
@@ -1126,7 +1262,7 @@ function App() {
                                                 variant="body2"
                                                 sx={{ fontWeight: 600, color: '#1a2a3a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
                                               >
-                                                {main.value}
+                                                {renderBoldText(main.value)}
                                               </Typography>
 
                                               {/* Sub-entries with vertical connector line */}
@@ -1147,7 +1283,7 @@ function App() {
                                                           variant="body2"
                                                           sx={{ color: '#3a4a5a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
                                                         >
-                                                          {item.value}
+                                                          {renderBoldText(item.value)}
                                                         </Typography>
                                                       )}
                                                     </Box>

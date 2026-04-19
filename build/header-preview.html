@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>PDF Header Previews</title>
+<style>
+  body { font-family: Calibri, Arial, sans-serif; background: #f0f2f5; padding: 40px; }
+  h1 { color: #333; font-size: 18px; margin-bottom: 30px; }
+  .card { background: white; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.12); padding: 24px; margin-bottom: 40px; max-width: 720px; }
+  .label { font-size: 13px; font-weight: 700; color: #555; margin-bottom: 12px; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  /* ── Option A ── */
+  .header-a {
+    background: #0f2850;
+    border-radius: 6px;
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+    height: 80px;
+  }
+  .header-a .accent { width: 10px; background: #48c7c7; flex-shrink: 0; }
+  .header-a .content { padding: 14px 20px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+  .header-a .title { font-size: 17px; font-weight: 700; color: #ffffff; }
+  .header-a .sub   { font-size: 12px; color: #82dcdc; }
+
+  /* ── Option B ── */
+  .header-b {
+    border-radius: 6px;
+    display: flex;
+    overflow: hidden;
+    height: 80px;
+  }
+  .header-b .left { flex: 0 0 65%; background: #0f2850; display: flex; flex-direction: column; justify-content: center; padding: 14px 20px; gap: 6px; }
+  .header-b .left .title { font-size: 17px; font-weight: 700; color: #ffffff; }
+  .header-b .left .sub   { font-size: 12px; color: #aac4e0; }
+  .header-b .right { flex: 1; background: #48c7c7; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .header-b .right .week-num { font-size: 26px; font-weight: 700; color: #ffffff; line-height: 1; }
+  .header-b .right .week-lbl { font-size: 10px; color: rgba(255,255,255,0.85); margin-top: 3px; }
+  .header-b .right .week-date { font-size: 9px; color: rgba(255,255,255,0.75); margin-top: 2px; }
+
+  /* ── Option C ── */
+  .header-c {
+    background: #f7f9fb;
+    border: 1px solid #dde3ea;
+    border-radius: 6px;
+    overflow: hidden;
+    height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 20px;
+    gap: 6px;
+    position: relative;
+  }
+  .header-c::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #48c7c7, #0f2850);
+  }
+  .header-c .title { font-size: 17px; font-weight: 700; color: #0f2850; }
+  .header-c .sub   { font-size: 12px; color: #5a7a99; }
+</style>
+</head>
+<body>
+<h1>PDF Header Design Options</h1>
+
+<div class="card">
+  <div class="label">Option A — Navy + Teal Accent Stripe (Recommended)</div>
+  <div class="header-a">
+    <div class="accent"></div>
+    <div class="content">
+      <div class="title">İş Süreç Platformları ve Çözümleri</div>
+      <div class="sub">16. Hafta &nbsp;|&nbsp; 27.04.2026 Haftalık Raporu</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="label">Option B — Two-Tone Split with Week Badge</div>
+  <div class="header-b">
+    <div class="left">
+      <div class="title">İş Süreç Platformları ve Çözümleri</div>
+      <div class="sub">27.04.2026 Haftalık Raporu</div>
+    </div>
+    <div class="right">
+      <div class="week-num">16</div>
+      <div class="week-lbl">. HAFTA</div>
+      <div class="week-date">2026</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="label">Option C — Minimal White with Gradient Bottom Border</div>
+  <div class="header-c">
+    <div class="title">İş Süreç Platformları ve Çözümleri</div>
+    <div class="sub">16. Hafta &nbsp;|&nbsp; 27.04.2026 Haftalık Raporu</div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -35,6 +35,53 @@ async function loadFontBase64(url) {
   return btoa(binary);
 }
 
+function formatPdfDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+function parseBoldSegments(text) {
+  const segs = [];
+  const re = /\*\*([^*]+)\*\*/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segs.push({ text: text.slice(last, m.index), bold: false });
+    segs.push({ text: m[1], bold: true });
+    last = re.lastIndex;
+  }
+  if (last < text.length) segs.push({ text: text.slice(last), bold: false });
+  return segs;
+}
+
+function renderBoldLine(doc, text, x, y) {
+  if (!text.includes('**')) { doc.text(text, x, y); return; }
+  const parts = parseBoldSegments(text);
+  let cx = x;
+  const baseFont = doc.getFont();
+  parts.forEach(p => {
+    if (!p.text) return;
+    doc.setFont('Calibri', p.bold ? 'bold' : 'normal');
+    doc.text(p.text, cx, y);
+    cx += doc.getTextWidth(p.text);
+  });
+  doc.setFont(baseFont.fontName, baseFont.fontStyle);
+}
+
+function getImgFormat(dataUrl) {
+  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) return 'JPEG';
+  return 'PNG';
+}
+
+function loadImageDimensions(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve({ ratio: (img.naturalWidth || 1) / (img.naturalHeight || 1) });
+    img.onerror = () => resolve({ ratio: 1 });
+    img.src = dataUrl;
+  });
+}
+
 function loadIconAsPng(url) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -79,65 +126,69 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       loadIconAsPng(process.env.PUBLIC_URL + '/pdfimages/pdf-logo.png'),
     ]);
 
+  // ─── PRE-LOAD INLINE IMAGE DIMENSIONS ───────────────────────────────────────
+  const imgRatioCache = {};
+  const allImgUrls = new Set();
+  actions.forEach(a => (a.actionItems || []).forEach(i => { if (i.type === 'image' && i.value) allImgUrls.add(i.value); }));
+  await Promise.all([...allImgUrls].map(async url => {
+    imgRatioCache[url] = (await loadImageDimensions(url)).ratio;
+  }));
+
   const pageW  = 210;
   const pageH  = 297;
   const mL     = 15;
   const mR     = 15;
   const cW     = pageW - mL - mR; // 180 mm
 
-  // ─── HEADER ────────────────────────────────────────────────────────────────
-  const hY    = 15;
-  const hH    = 28;                 // slightly taller for 14pt lines
-  const tealW = cW * 0.55;
-  const rightW = cW - tealW;
+  // ─── HEADER (Option A: Navy + Teal accent stripe) ──────────────────────────
+  const hY      = 15;
+  const hH      = 30;
+  const accentW = 4; // mm — left teal stripe
 
-  // Teal left block
+  // Dark navy background
+  doc.setFillColor(15, 40, 80);
+  doc.rect(mL, hY, cW, hH, 'F');
+
+  // Left teal accent stripe
   doc.setFillColor(72, 199, 199);
-  doc.rect(mL, hY, tealW, hH, 'F');
-
-  // White right block
-  doc.setFillColor(255, 255, 255);
-  doc.rect(mL + tealW, hY, rightW, hH, 'F');
-
-  // Logo in right block — scaled to fit with padding
-  if (headerLogoPng) {
-    const logoMaxH = hH - 6;
-    const logoMaxW = rightW - 8;
-    const img = new Image();
-    img.src = headerLogoPng;
-    const ratio = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
-    let logoW = logoMaxW;
-    let logoH = logoW / ratio;
-    if (logoH > logoMaxH) { logoH = logoMaxH; logoW = logoH * ratio; }
-    const logoX = mL + tealW + (rightW - logoW) / 2;
-    const logoY = hY + (hH - logoH) / 2;
-    doc.addImage(headerLogoPng, 'PNG', logoX, logoY, logoW, logoH);
-  }
+  doc.rect(mL, hY, accentW, hH, 'F');
 
   // Week data
-  const weekObj   = weeks.find(w => String(w.WeekNumber) === String(formData.week));
-  const weekNum   = weekObj ? weekObj.WeekNumber : '';
-  const weekYear  = weekObj ? weekObj.Year       : new Date().getFullYear();
-  const nextMon   = weekObj ? getNextMonday(weekObj.WeekNumber, weekObj.Year) : new Date();
+  const weekObj  = weeks.find(w => String(w.WeekNumber) === String(formData.week));
+  const weekNum  = weekObj ? weekObj.WeekNumber : '';
+  const nextMon  = weekObj ? getNextMonday(weekObj.WeekNumber, weekObj.Year) : new Date();
 
-  // Line 1 – "{UnitName} Haftalık Raporu"
-  const line1 = `${userData.UnitName || ''} Haftalık Raporu`;
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('Calibri', 'bold');
-  doc.setFontSize(14);
-  doc.text(line1, mL + 5, hY + 11);
+  const posNum = userData.PositionNumber || 0;
+  const cx = mL + cW / 2; // horizontal centre of header
 
-  // Line 2 – "{WeekNumber}. Hafta | dd.MM.yyyy"
-  const line2 = `${weekNum}. Hafta | ${formatDate(nextMon)}`;
-  doc.setFont('Calibri', 'normal');
-  doc.setFontSize(14);
-  doc.text(line2, mL + 5, hY + 22);
+  if (posNum >= 5) {
+    // GM — no unit/line; large centred week number + date
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('Calibri', 'bold');
+    doc.setFontSize(17);
+    doc.text(`${weekNum}. HAFTA`, cx, hY + 12, { align: 'center' });
+    doc.setTextColor(130, 220, 220);
+    doc.setFont('Calibri', 'normal');
+    doc.setFontSize(11);
+    doc.text(`${formatDate(nextMon)}  —  Haftalık Raporu`, cx, hY + 23, { align: 'center' });
+  } else {
+    // Unit manager / EVP — title line + week info
+    const titleText = posNum === 4 ? (userData.LineName || '') : (userData.UnitName || '');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('Calibri', 'bold');
+    doc.setFontSize(14);
+    doc.text(titleText, mL + accentW + 6, hY + 11);
+    const line2 = `${weekNum}. Hafta  |  ${formatDate(nextMon)} Haftalık Raporu`;
+    doc.setTextColor(130, 220, 220);
+    doc.setFont('Calibri', 'normal');
+    doc.setFontSize(11);
+    doc.text(line2, mL + accentW + 6, hY + 22);
+  }
 
-  // Border around header
-  doc.setDrawColor(180, 180, 180);
-  doc.setLineWidth(0.3);
-  doc.rect(mL, hY, cW, hH);
-  doc.line(mL + tealW, hY, mL + tealW, hY + hH);
+  // Subtle teal bottom border line
+  doc.setDrawColor(72, 199, 199);
+  doc.setLineWidth(0.5);
+  doc.line(mL, hY + hH, mL + cW, hY + hH);
 
   // ─── TABLE ─────────────────────────────────────────────────────────────────
   const leftCW  = 45;   // left icon column width
@@ -148,33 +199,67 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
 
   let curY = hY + hH;
 
-  const lineH    = 5;   // mm per text line
+  const lineH    = 3.8; // mm per text line (matches jsPDF ~3.65mm for 9pt)
   const headerH  = 6;   // mm per type-header line
   const groupGap = 3;   // mm gap between type groups
+  const subIndent = 4;  // mm extra left indent for sub-entries
+  const bulletGap = 1.5; // mm extra gap after each bullet item
   const maxTextW = rightCW - padX * 2;
+  const maxImgW   = maxTextW;
+  const maxImgH   = 40; // mm — max image height in PDF
 
   for (const row of STATUS_ROWS) {
     // Collect status-matching actions
     const matched = actions.filter(a => actionStatuses[a.id] === row.key);
 
-    // Group by Tür (type), preserving insertion order
-    const byType = {};
+    // Group by type+date when IncludeDate=true & Header non-empty, else by type only
+    const byGroup = {};
+    const groupHeaderMap = {};
+    const groupSortMap = {};
     matched.forEach(a => {
       const typeName = a.type || '';
-      if (!byType[typeName]) byType[typeName] = [];
-      (a.actionItems || [])
-        .filter(i => i.type === 'text' && i.value && i.value.trim())
-        .forEach(i => byType[typeName].push(i.value.trim()));
+      const rawHeader = a.typeHeader ?? '';
+      const useDateHeader = a.includeDate && rawHeader;
+      const groupKey = useDateHeader ? `${typeName}\x00${a.date}` : typeName;
+      if (!byGroup[groupKey]) byGroup[groupKey] = [];
+      groupHeaderMap[groupKey] = useDateHeader
+        ? `${formatPdfDate(a.date)} tarihinde ${rawHeader};`
+        : rawHeader;
+      groupSortMap[groupKey] = a.typeSortOrder ?? 0;
+      (a.actionItems || []).forEach((i, idx) => {
+        if (!((i.type === 'text' && i.value && i.value.trim()) || (i.type === 'image' && i.value))) return;
+        byGroup[groupKey].push(
+          i.type === 'image'
+            ? { type: 'image', value: i.value, isSub: idx > 0 }
+            : { type: 'text', value: i.value.trim(), isSub: idx > 0 }
+        );
+      });
     });
-    const typeGroups = Object.entries(byType);
+    const typeGroups = Object.entries(byGroup)
+      .sort(([ka], [kb]) => {
+        const ha = groupHeaderMap[ka] ?? '';
+        const hb = groupHeaderMap[kb] ?? '';
+        if (!ha && hb) return -1;
+        if (ha && !hb) return 1;
+        return (groupSortMap[ka] ?? 0) - (groupSortMap[kb] ?? 0);
+      });
 
     // Measure total right-cell height
     doc.setFontSize(9);
     let contentH = 0;
-    typeGroups.forEach(([typeName, bullets], gi) => {
-      if (typeName) contentH += headerH;
+    typeGroups.forEach(([groupKey, bullets], gi) => {
+      const displayHeader = groupHeaderMap[groupKey] ?? '';
+      if (displayHeader) contentH += headerH;
       bullets.forEach(b => {
-        contentH += doc.splitTextToSize('• ' + b, maxTextW).length * lineH;
+        if (b.type === 'image') {
+          const ratio = imgRatioCache[b.value] || 1;
+          const h = Math.min(maxImgH, maxImgW / ratio);
+          contentH += h + lineH;
+        } else {
+          const indent = b.isSub ? subIndent : 0;
+          const plain = b.value.replace(/\*\*/g, '');
+          contentH += doc.splitTextToSize('• ' + plain, maxTextW - indent).length * lineH + bulletGap;
+        }
       });
       if (gi < typeGroups.length - 1) contentH += groupGap;
     });
@@ -221,13 +306,14 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
 
     // Right cell — grouped by Tür
     let textY = curY + padY + 5;
-    typeGroups.forEach(([typeName, bullets], gi) => {
-      // Type header (bold)
-      if (typeName) {
+    typeGroups.forEach(([groupKey, bullets], gi) => {
+      // Type header (bold) — uses Header field; empty = skip
+      const displayHeader = groupHeaderMap[groupKey] ?? '';
+      if (displayHeader) {
         doc.setFont('Calibri', 'bold');
         doc.setFontSize(9);
         doc.setTextColor(30, 30, 30);
-        doc.text(typeName, mL + leftCW + padX, textY);
+        doc.text(displayHeader, mL + leftCW + padX, textY);
         textY += headerH;
       }
       // Bullet items
@@ -235,9 +321,30 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       doc.setFontSize(9);
       doc.setTextColor(50, 50, 50);
       bullets.forEach(b => {
-        const wrapped = doc.splitTextToSize('• ' + b, maxTextW);
-        doc.text(wrapped, mL + leftCW + padX, textY);
-        textY += wrapped.length * lineH;
+        const bX = mL + leftCW + padX + (b.isSub ? subIndent : 0);
+        const bW = maxTextW - (b.isSub ? subIndent : 0);
+        if (b.type === 'image') {
+          const ratio = imgRatioCache[b.value] || 1;
+          let imgW = Math.min(bW, 60);
+          let imgH = imgW / ratio;
+          if (imgH > maxImgH) { imgH = maxImgH; imgW = imgH * ratio; }
+          const imgX = bX + (bW - imgW) / 2;
+          try { doc.addImage(b.value, getImgFormat(b.value), imgX, textY, imgW, imgH); } catch (_) {}
+          textY += imgH + lineH;
+        } else if (!b.value.includes('**')) {
+          const wrapped = doc.splitTextToSize('• ' + b.value, bW);
+          doc.text(wrapped, bX, textY);
+          textY += wrapped.length * lineH + bulletGap;
+        } else {
+          const plain = b.value.replace(/\*\*/g, '');
+          const wrapped = doc.splitTextToSize('• ' + plain, bW);
+          renderBoldLine(doc, '• ' + b.value, bX, textY);
+          if (wrapped.length > 1) {
+            doc.setFont('Calibri', 'normal');
+            doc.text(wrapped.slice(1), bX, textY + lineH);
+          }
+          textY += wrapped.length * lineH + bulletGap;
+        }
       });
       if (gi < typeGroups.length - 1) textY += groupGap;
     });
@@ -251,12 +358,6 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   doc.line(mL, curY, mL + cW, curY);
 
   // ─── FOOTER ────────────────────────────────────────────────────────────────
-  doc.setFont('Calibri', 'italic');
-  doc.setFontSize(7);
-  doc.setTextColor(160, 160, 160);
-  const today = new Date().toLocaleDateString('tr-TR');
-  doc.text(`Oluşturulma tarihi: ${today}`, mL, pageH - 8);
-  doc.text(userData.FullName || '', pageW - mR, pageH - 8, { align: 'right' });
 
   // Save
   const name = `Haftalik_Rapor_H${formData.week || 'X'}.pdf`;

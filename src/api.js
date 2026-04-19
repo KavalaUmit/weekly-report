@@ -34,6 +34,11 @@ const patch = (url, body) => json(url, {
   body: JSON.stringify(body)
 });
 
+const del = (url) => json(url, {
+  credentials: 'include',
+  method: 'DELETE',
+});
+
 // GET /api/users/me – backend resolves identity via Windows Authentication
 export const getMe = () =>
   fetch(`${BASE}/api/users/me`, { credentials: 'include' });
@@ -70,4 +75,4 @@ export const patchActionStatus = (id, data) =>
   patch(`${BASE}/api/actions/${id}/status`, data);
 
 export const deleteAction = (id) =>
-  json(`${BASE}/api/actions/${id}`, { method: 'DELETE' });
+  del(`${BASE}/api/actions/${id}`);
