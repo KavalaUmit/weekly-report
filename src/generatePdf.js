@@ -54,18 +54,57 @@ function parseBoldSegments(text) {
   return segs;
 }
 
-function renderBoldLine(doc, text, x, y) {
-  if (!text.includes('**')) { doc.text(text, x, y); return; }
-  const parts = parseBoldSegments(text);
-  let cx = x;
-  const baseFont = doc.getFont();
-  parts.forEach(p => {
-    if (!p.text) return;
-    doc.setFont('Calibri', p.bold ? 'bold' : 'normal');
-    doc.text(p.text, cx, y);
-    cx += doc.getTextWidth(p.text);
+// Split bold-marked text into word-level tokens preserving bold flag
+function getBoldTokens(text) {
+  const tokens = [];
+  parseBoldSegments(text).forEach(seg => {
+    let i = 0;
+    const raw = seg.text;
+    while (i < raw.length) {
+      const sp = raw.indexOf(' ', i);
+      if (sp === -1) { tokens.push({ text: raw.slice(i), bold: seg.bold }); break; }
+      tokens.push({ text: raw.slice(i, sp + 1), bold: seg.bold });
+      i = sp + 1;
+    }
   });
-  doc.setFont(baseFont.fontName, baseFont.fontStyle);
+  return tokens;
+}
+
+// Count how many lines bold-marked text occupies at given maxWidth
+function measureBoldLines(doc, text, maxWidth) {
+  if (!text.includes('**')) {
+    doc.setFont('Calibri', 'normal');
+    return doc.splitTextToSize(text, maxWidth).length;
+  }
+  let cx = 0, lines = 1;
+  getBoldTokens(text).forEach(tok => {
+    doc.setFont('Calibri', tok.bold ? 'bold' : 'normal');
+    const w = doc.getTextWidth(tok.text);
+    if (cx > 0 && cx + w > maxWidth) { cx = 0; lines++; }
+    cx += w;
+  });
+  doc.setFont('Calibri', 'normal');
+  return lines;
+}
+
+// Render bold-marked text with proper word-level line wrapping
+function renderBoldWrapped(doc, text, x, y, maxWidth, lineH) {
+  if (!text.includes('**')) {
+    doc.setFont('Calibri', 'normal');
+    const wrapped = doc.splitTextToSize(text, maxWidth);
+    doc.text(wrapped, x, y);
+    return wrapped.length;
+  }
+  let cx = 0, curY = y, lines = 1;
+  getBoldTokens(text).forEach(tok => {
+    doc.setFont('Calibri', tok.bold ? 'bold' : 'normal');
+    const w = doc.getTextWidth(tok.text);
+    if (cx > 0 && cx + w > maxWidth) { cx = 0; curY += lineH; lines++; }
+    doc.text(tok.text, x + cx, curY);
+    cx += w;
+  });
+  doc.setFont('Calibri', 'normal');
+  return lines;
 }
 
 function getImgFormat(dataUrl) {
@@ -220,6 +259,7 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       const typeName = a.type || '';
       const rawHeader = a.typeHeader ?? '';
       const useDateHeader = a.includeDate && rawHeader;
+      console.log('[PDF DEBUG]', { id: a.id, type: typeName, typeHeader: rawHeader, includeDate: a.includeDate, date: a.date, useDateHeader: !!useDateHeader });
       const groupKey = useDateHeader ? `${typeName}\x00${a.date}` : typeName;
       if (!byGroup[groupKey]) byGroup[groupKey] = [];
       groupHeaderMap[groupKey] = useDateHeader
@@ -244,112 +284,107 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
         return (groupSortMap[ka] ?? 0) - (groupSortMap[kb] ?? 0);
       });
 
-    // Measure total right-cell height
+    // ── Layout pass: assign every item to a page segment ─────────────────────
     doc.setFontSize(9);
-    let contentH = 0;
-    typeGroups.forEach(([groupKey, bullets], gi) => {
-      const displayHeader = groupHeaderMap[groupKey] ?? '';
-      if (displayHeader) contentH += headerH;
-      bullets.forEach(b => {
-        if (b.type === 'image') {
-          const ratio = imgRatioCache[b.value] || 1;
-          const h = Math.min(maxImgH, maxImgW / ratio);
-          contentH += h + lineH;
-        } else {
-          const indent = b.isSub ? subIndent : 0;
-          const plain = b.value.replace(/\*\*/g, '');
-          contentH += doc.splitTextToSize('• ' + plain, maxTextW - indent).length * lineH + bulletGap;
-        }
-      });
-      if (gi < typeGroups.length - 1) contentH += groupGap;
-    });
-
-    const rowH = Math.max(minH, contentH + padY * 2 + 4);
-
-    // Page break check
-    if (curY + rowH > pageH - 15) {
-      doc.addPage();
-      curY = 15;
-    }
-
-    // Row background
-    doc.setFillColor(251, 252, 255);
-    doc.rect(mL, curY, cW, rowH, 'F');
-
-    // Row border
-    doc.setDrawColor(200, 210, 220);
-    doc.setLineWidth(0.3);
-    doc.rect(mL, curY, cW, rowH);
-    doc.line(mL + leftCW, curY, mL + leftCW, curY + rowH);
-
-    // Icon / circle in left cell
-    const cx = mL + leftCW / 2;
-    const cy = curY + rowH / 2 - 5;
-    const cr = 9;
     const iconDataUrlMap = { highlight: highlightIconB64, lowlight: lowlightIconB64, information: informationIconB64, waiting: waitingIconB64, progress: progressIconB64 };
-    const iconDataUrl = iconDataUrlMap[row.key];
-    if (iconDataUrl) {
-      doc.addImage(iconDataUrl, 'PNG', cx - cr, cy - cr, cr * 2, cr * 2);
-    } else {
-      doc.setFillColor(row.r, row.g, row.b);
-      doc.circle(cx, cy, cr, 'F');
-    }
+    const contentBottom = pageH - 15;
+    const segments = [];
+    let curSeg = { startY: curY, items: [] };
+    let y = curY + padY + 5;
 
-    // Status label below icon
-    doc.setTextColor(60, 60, 60);
-    doc.setFont('Calibri', 'bold');
-    doc.setFontSize(7);
-    const labelParts = row.label.split('\n');
-    labelParts.forEach((part, i) => {
-      doc.text(part, cx, cy + cr + 4 + i * 4, { align: 'center' });
-    });
+    const checkBreak = (neededH) => {
+      if (y + neededH > contentBottom && y > curSeg.startY + padY + 5) {
+        curSeg.endY = Math.max(y + padY, curSeg.startY + minH);
+        segments.push(curSeg);
+        curSeg = { startY: 15, items: [] };
+        y = 15 + padY + 5;
+      }
+    };
 
-    // Right cell — grouped by Tür
-    let textY = curY + padY + 5;
     typeGroups.forEach(([groupKey, bullets], gi) => {
-      // Type header (bold) — uses Header field; empty = skip
       const displayHeader = groupHeaderMap[groupKey] ?? '';
       if (displayHeader) {
-        doc.setFont('Calibri', 'bold');
-        doc.setFontSize(9);
-        doc.setTextColor(30, 30, 30);
-        doc.text(displayHeader, mL + leftCW + padX, textY);
-        textY += headerH;
+        checkBreak(headerH);
+        curSeg.items.push({ kind: 'header', text: displayHeader, y });
+        y += headerH;
       }
-      // Bullet items
-      doc.setFont('Calibri', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(50, 50, 50);
       bullets.forEach(b => {
-        const bX = mL + leftCW + padX + (b.isSub ? subIndent : 0);
-        const bW = maxTextW - (b.isSub ? subIndent : 0);
-        if (b.type === 'image') {
-          const ratio = imgRatioCache[b.value] || 1;
-          let imgW = Math.min(bW, 60);
-          let imgH = imgW / ratio;
-          if (imgH > maxImgH) { imgH = maxImgH; imgW = imgH * ratio; }
-          const imgX = bX + (bW - imgW) / 2;
-          try { doc.addImage(b.value, getImgFormat(b.value), imgX, textY, imgW, imgH); } catch (_) {}
-          textY += imgH + lineH;
-        } else if (!b.value.includes('**')) {
-          const wrapped = doc.splitTextToSize('• ' + b.value, bW);
-          doc.text(wrapped, bX, textY);
-          textY += wrapped.length * lineH + bulletGap;
+        const indent = b.isSub ? subIndent : 0;
+        const bX = mL + leftCW + padX + indent;
+        const bW = maxTextW - indent;
+        const itemH = b.type === 'image'
+          ? Math.min(maxImgH, maxImgW / (imgRatioCache[b.value] || 1)) + lineH
+          : measureBoldLines(doc, '• ' + b.value, bW) * lineH + bulletGap;
+        checkBreak(itemH);
+        curSeg.items.push({ kind: 'bullet', b, bX, bW, y, itemH });
+        y += itemH;
+      });
+      if (gi < typeGroups.length - 1) y += groupGap;
+    });
+    curSeg.endY = Math.max(y + padY, curSeg.startY + minH);
+    segments.push(curSeg);
+
+    // ── Render pass: draw each segment ────────────────────────────────────────
+    segments.forEach((seg, si) => {
+      if (si > 0) doc.addPage();
+      const segH = seg.endY - seg.startY;
+
+      // Background
+      doc.setFillColor(251, 252, 255);
+      doc.rect(mL, seg.startY, cW, segH, 'F');
+
+      // Borders
+      doc.setDrawColor(200, 210, 220);
+      doc.setLineWidth(0.3);
+      doc.rect(mL, seg.startY, cW, segH);
+      doc.line(mL + leftCW, seg.startY, mL + leftCW, seg.startY + segH);
+
+      // Icon + label (first segment only)
+      if (si === 0) {
+        const icx = mL + leftCW / 2;
+        const icy = seg.startY + segH / 2 - 5;
+        const cr = 9;
+        const iconDataUrl = iconDataUrlMap[row.key];
+        if (iconDataUrl) {
+          doc.addImage(iconDataUrl, 'PNG', icx - cr, icy - cr, cr * 2, cr * 2);
         } else {
-          const plain = b.value.replace(/\*\*/g, '');
-          const wrapped = doc.splitTextToSize('• ' + plain, bW);
-          renderBoldLine(doc, '• ' + b.value, bX, textY);
-          if (wrapped.length > 1) {
-            doc.setFont('Calibri', 'normal');
-            doc.text(wrapped.slice(1), bX, textY + lineH);
+          doc.setFillColor(row.r, row.g, row.b);
+          doc.circle(icx, icy, cr, 'F');
+        }
+        doc.setTextColor(60, 60, 60);
+        doc.setFont('Calibri', 'bold');
+        doc.setFontSize(7);
+        row.label.split('\n').forEach((part, i) => {
+          doc.text(part, icx, icy + cr + 4 + i * 4, { align: 'center' });
+        });
+      }
+
+      // Content items
+      seg.items.forEach(item => {
+        if (item.kind === 'header') {
+          doc.setFont('Calibri', 'bold');
+          doc.setFontSize(9);
+          doc.setTextColor(30, 30, 30);
+          doc.text(item.text, mL + leftCW + padX, item.y);
+        } else {
+          doc.setFont('Calibri', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor(50, 50, 50);
+          if (item.b.type === 'image') {
+            const ratio = imgRatioCache[item.b.value] || 1;
+            let imgW = Math.min(item.bW, 60);
+            let imgH = imgW / ratio;
+            if (imgH > maxImgH) { imgH = maxImgH; imgW = imgH * ratio; }
+            const imgX = item.bX + (item.bW - imgW) / 2;
+            try { doc.addImage(item.b.value, getImgFormat(item.b.value), imgX, item.y, imgW, imgH); } catch (_) {}
+          } else {
+            renderBoldWrapped(doc, '• ' + item.b.value, item.bX, item.y, item.bW, lineH);
           }
-          textY += wrapped.length * lineH + bulletGap;
         }
       });
-      if (gi < typeGroups.length - 1) textY += groupGap;
     });
 
-    curY += rowH;
+    curY = segments[segments.length - 1].endY;
   }
 
   // Bottom border line

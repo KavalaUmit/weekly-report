@@ -61,7 +61,9 @@ CREATE TABLE tbl_weekly_report_ActionTypes (
     TypeID      INT             IDENTITY(1,1) PRIMARY KEY,
     TypeName    NVARCHAR(128)   NOT NULL UNIQUE,
     SortOrder   INT             NOT NULL DEFAULT 0,
-    IsActive    BIT             NOT NULL DEFAULT 1
+    IsActive    BIT             NOT NULL DEFAULT 1,
+    Header      NVARCHAR(256)   NULL,            -- PDF section header text (NULL = no header printed)
+    IncludeDate BIT             NOT NULL DEFAULT 0 -- 1 = prepend action date to Header in PDF
 );
 
 -- -------------------------------------------------------------
