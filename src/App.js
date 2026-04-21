@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './print.css';
 import { generatePdf } from './generatePdf';
+import { generateWord } from './generateWord';
 import * as api from './api';
 import {
   Container,
@@ -38,11 +39,13 @@ import {
   RemoveCircle,
   Delete,
   Article,
+  Description as WordIcon,
   Add,
   InsertPhoto,
   ChevronLeft,
   ChevronRight,
-  PictureAsPdf
+  PictureAsPdf,
+  MoreHoriz
 } from '@mui/icons-material';
 
 function App() {
@@ -87,6 +90,7 @@ function App() {
   const [selectedLineId, setSelectedLineId] = useState(null);
   const [userError, setUserError] = useState(null);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+  const [exportMenuAnchor, setExportMenuAnchor] = useState(null);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const dateInputRef = useRef(null);
   const editableRef = useRef(null);
@@ -242,7 +246,7 @@ function App() {
     e.preventDefault();
 
     const selectedType = types.find(t => t.TypeName === formData.type);
-    const showDate = !formData.type || selectedType?.IncludeDate !== false;
+    const showDate = !!selectedType?.IncludeDate;
     const newErrors = {
       week: !formData.week,
       type: !formData.type,
@@ -263,7 +267,7 @@ function App() {
         await api.updateAction(editingActionId, {
           WeekID: weekObj?.WeekID,
           TypeID: typeObj?.TypeID,
-          ActionDate: formData.date,
+          ActionDate: showDate ? formData.date : '1900-01-01',
           actionItems
         });
       } else {
@@ -271,7 +275,7 @@ function App() {
           UserID: userData.UserID,
           WeekID: weekObj?.WeekID,
           TypeID: typeObj?.TypeID,
-          ActionDate: formData.date,
+          ActionDate: showDate ? formData.date : '1900-01-01',
           actionItems
         });
       }
@@ -471,6 +475,8 @@ function App() {
   };
 
   const handlePrint = () => generatePdf({ actions, actionStatuses, userData, weeks, formData }).catch(console.error);
+  const handleExportWord = () => { setExportMenuAnchor(null); generateWord({ actions, actionStatuses, userData, weeks, formData }).catch(console.error); };
+  const handleExportPdf  = () => { setExportMenuAnchor(null); handlePrint(); };
 
   const toggleStatusFilter = () => {
     setShowOnlyWithStatus(prev => !prev);
@@ -739,7 +745,7 @@ function App() {
                     {errors.type && <FormHelperText>Lütfen tür seçin</FormHelperText>}
                   </FormControl>
 
-                  {(types.find(t => t.TypeName === formData.type)?.IncludeDate !== false || !formData.type) && (
+                  {!!types.find(t => t.TypeName === formData.type)?.IncludeDate && (
                   <TextField
                     fullWidth margin="normal" type="date" name="date"
                     label="Tarih" value={formData.date} onChange={handleInputChange}
@@ -788,7 +794,7 @@ function App() {
                           px: '14px', py: '12px',
                           outline: 'none',
                           fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
-                          fontSize: '1rem',
+                          fontSize: '0.75rem',
                           lineHeight: 1.6,
                           color: 'rgba(0,0,0,0.87)',
                           whiteSpace: 'pre-wrap',
@@ -1142,21 +1148,29 @@ function App() {
                       {showOnlyWithStatus ? 'Tümünü Göster' : 'Rapora Eklenenler'}
                     </Button>
                   )}
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handlePrint}
-                    startIcon={<PictureAsPdf fontSize="small" />}
-                    className="no-print"
-                    sx={{
-                      fontSize: '12px', fontWeight: 600, borderRadius: 2, minWidth: 160,
-                      borderColor: 'rgba(255,255,255,0.6)', color: 'white',
-                      background: 'rgba(255,255,255,0.15)',
-                      '&:hover': { background: 'rgba(255,255,255,0.25)', borderColor: 'white' }
-                    }}
+                  <Tooltip title="Dışa Aktar">
+                    <IconButton
+                      size="small"
+                      className="no-print"
+                      onClick={(e) => setExportMenuAnchor(e.currentTarget)}
+                      sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, px: 1, '&:hover': { background: 'rgba(255,255,255,0.2)' } }}
+                    >
+                      <MoreHoriz fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Menu
+                    anchorEl={exportMenuAnchor}
+                    open={Boolean(exportMenuAnchor)}
+                    onClose={() => setExportMenuAnchor(null)}
+                    PaperProps={{ sx: { mt: 1, minWidth: 180, borderRadius: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' } }}
                   >
-                    PDF'e Çevir
-                  </Button>
+                    <MenuItem onClick={handleExportPdf} sx={{ fontSize: '0.75rem', gap: 1.5 }}>
+                      <PictureAsPdf fontSize="small" sx={{ color: '#c62828' }} /> PDF'e Çevir
+                    </MenuItem>
+                    <MenuItem onClick={handleExportWord} sx={{ fontSize: '0.75rem', gap: 1.5 }}>
+                      <WordIcon fontSize="small" sx={{ color: '#1565c0' }} /> Word'e Çevir
+                    </MenuItem>
+                  </Menu>
                 </Box>
               </Box>
 
@@ -1246,7 +1260,7 @@ function App() {
                                             }}
                                           />
                                           <Typography variant="caption" color="text.disabled" sx={{ ml: 'auto', flexShrink: 0, fontStyle: 'italic' }}>
-                                            {userData.FullName} — {action.date}
+                                            {userData.FullName}{action.includeDate && action.date && !action.date.startsWith('1900') ? ` — ${action.date}` : ''}
                                           </Typography>
                                         </Box>
 
