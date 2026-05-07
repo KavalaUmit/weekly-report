@@ -8,15 +8,15 @@ const STATUS_ROWS = [
   { key: 'progress',    label: 'Progress',                      r:  16, g: 185, b: 129 },
 ];
 
-// Returns the Monday of the week AFTER weekNumber (i.e. "next Monday")
-function getNextMonday(weekNumber, year) {
+// Returns the Monday of weekNumber in the given year
+function getWeekMonday(weekNumber, year) {
   const jan1     = new Date(year, 0, 1);
   const jan1Day  = jan1.getDay(); // 0=Sun,1=Mon,...6=Sat
   const toMon    = jan1Day === 0 ? 1 : jan1Day === 1 ? 0 : 8 - jan1Day;
   const week1Mon = new Date(year, 0, 1 + toMon);
-  const nextMon  = new Date(week1Mon);
-  nextMon.setDate(week1Mon.getDate() + weekNumber * 7); // week N+1 Monday
-  return nextMon;
+  const mon      = new Date(week1Mon);
+  mon.setDate(week1Mon.getDate() + (weekNumber - 1) * 7); // week N Monday
+  return mon;
 }
 
 function formatDate(d) {
@@ -195,7 +195,7 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   // Week data
   const weekObj  = weeks.find(w => String(w.WeekNumber) === String(formData.week));
   const weekNum  = weekObj ? weekObj.WeekNumber : '';
-  const nextMon  = weekObj ? getNextMonday(weekObj.WeekNumber, weekObj.Year) : new Date();
+  const nextMon  = weekObj ? getWeekMonday(weekObj.WeekNumber, weekObj.Year) : new Date();
 
   const posNum = userData.PositionNumber || 0;
   const cx = mL + cW / 2; // horizontal centre of header
@@ -259,7 +259,6 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       const typeName = a.type || '';
       const rawHeader = a.typeHeader ?? '';
       const useDateHeader = a.includeDate && rawHeader;
-      console.log('[PDF DEBUG]', { id: a.id, type: typeName, typeHeader: rawHeader, includeDate: a.includeDate, date: a.date, useDateHeader: !!useDateHeader });
       const groupKey = useDateHeader ? `${typeName}\x00${a.date}` : typeName;
       if (!byGroup[groupKey]) byGroup[groupKey] = [];
       groupHeaderMap[groupKey] = useDateHeader

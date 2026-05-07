@@ -202,6 +202,8 @@ function App() {
             includeDate: !!a.IncludeDate,
             typeSortOrder: a.TypeSortOrder ?? 0,
             date: a.ActionDate ? a.ActionDate.split('T')[0] : '',
+            fullName: a.FullName || '',
+            departmentName: a.DepartmentName || a.UnitName || a.LineName || '',
             actionItems: items.map(i => ({ type: i.ItemType, value: i.ItemValue })),
             timestamp: new Date(a.CreatedAt).toLocaleString('tr-TR'),
             statusKey: a.StatusKey || null
@@ -290,7 +292,7 @@ function App() {
     setEditingActionId(null);
     setFormData({ week: formData.week, type: '', date: '', actionItems: [{ type: 'text', value: '' }] });
     setErrors({ week: false, type: false, date: false, action: false });
-    if (editableRef.current) editableRef.current.innerHTML = '';
+    if (editableRef.current) editableRef.current.textContent = '';
   };
 
   const handleActionItemChange = (index, value) => {
@@ -344,7 +346,7 @@ function App() {
     const el = editableRef.current;
     if (!el) return;
     el.focus();
-    document.execCommand('bold', false, null);
+    document.execCommand('bold', false, null); // NOSONAR — no Range API equivalent for toggle
     setTimeout(() => handleActionItemChange(0, htmlToMarkers(el.innerHTML)), 0);
   };
 
@@ -352,7 +354,7 @@ function App() {
     const el = subEditableRefs.current[index];
     if (!el) return;
     el.focus();
-    document.execCommand('bold', false, null);
+    document.execCommand('bold', false, null); // NOSONAR — no Range API equivalent for toggle
     setTimeout(() => handleActionItemChange(index, htmlToMarkers(el.innerHTML)), 0);
   };
 
@@ -363,7 +365,17 @@ function App() {
   const handleContentPaste = (e) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    handleActionItemChange(0, htmlToMarkers(e.currentTarget.innerHTML));
   };
 
   useEffect(() => {
@@ -859,7 +871,19 @@ function App() {
                               contentEditable
                               suppressContentEditableWarning
                               onInput={(e) => handleActionItemChange(index, htmlToMarkers(e.currentTarget.innerHTML))}
-                              onPaste={(e) => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); }}
+                              onPaste={(e) => {
+                                e.preventDefault();
+                                const text = e.clipboardData.getData('text/plain');
+                                const sel = window.getSelection();
+                                if (!sel || !sel.rangeCount) return;
+                                const r = sel.getRangeAt(0);
+                                r.deleteContents();
+                                const node = document.createTextNode(text);
+                                r.insertNode(node);
+                                r.setStartAfter(node); r.collapse(true);
+                                sel.removeAllRanges(); sel.addRange(r);
+                                handleActionItemChange(index, htmlToMarkers(e.currentTarget.innerHTML));
+                              }}
                               sx={{
                                 flex: 1,
                                 minHeight: 52,
@@ -868,7 +892,7 @@ function App() {
                                 px: '12px', py: '9px',
                                 outline: 'none',
                                 fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
-                                fontSize: '0.95rem',
+                                fontSize: '0.75rem',
                                 lineHeight: 1.5,
                                 color: 'rgba(0,0,0,0.87)',
                                 whiteSpace: 'pre-wrap',
@@ -1242,7 +1266,7 @@ function App() {
                                     transition: 'all 0.15s',
                                     boxShadow: isEditing ? '0 2px 8px rgba(0,68,129,0.15)' : 'none',
                                   }}
-                                  onClick={() => handleActionClick(action)}
+                                  onClick={(e) => { if (window.getSelection()?.toString()) return; handleActionClick(action); }}
                                   onContextMenu={(e) => handleContextMenu(e, action.id)}
                                 >
                                   <ListItemText
@@ -1259,9 +1283,16 @@ function App() {
                                               color: 'white', borderRadius: '6px',
                                             }}
                                           />
-                                          <Typography variant="caption" color="text.disabled" sx={{ ml: 'auto', flexShrink: 0, fontStyle: 'italic' }}>
-                                            {userData.FullName}{action.includeDate && action.date && !action.date.startsWith('1900') ? ` — ${action.date}` : ''}
-                                          </Typography>
+                                          <Box sx={{ ml: 'auto', flexShrink: 0, textAlign: 'right' }}>
+                                            <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic', display: 'block' }}>
+                                              {action.fullName || userData.FullName}{action.includeDate && action.date && !action.date.startsWith('1900') ? ` — ${action.date}` : ''}
+                                            </Typography>
+                                            {(action.departmentName) && (
+                                              <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', display: 'block' }}>
+                                                {action.departmentName}
+                                              </Typography>
+                                            )}
+                                          </Box>
                                         </Box>
 
                                         {(() => {

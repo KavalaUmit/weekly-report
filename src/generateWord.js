@@ -36,9 +36,14 @@ function formatDate(d) {
   return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
 }
 
-// ── Convert **bold** markers to <b> HTML ─────────────────────────────────────
+// ── HTML-escape user data before interpolation (XSS prevention) ──────────────
+function escHtml(s) {
+  return (s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Convert **bold** markers to <b> HTML (applied AFTER escaping) ─────────────
 function parseBold(text) {
-  return (text || '').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  return escHtml(text).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 }
 
 // ── rgb(r,g,b) helper ─────────────────────────────────────────────────────────
@@ -159,7 +164,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       const gap     = gi < typeGroups.length - 1 ? '<p style="margin:5pt 0 0 0;font-size:4pt;">&nbsp;</p>' : '';
 
       const headerHtml = header
-        ? `<p style="margin:0 0 3pt 0;font-size:9pt;font-weight:bold;color:#1e1e1e;">${header}</p>`
+        ? `<p style="margin:0 0 3pt 0;font-size:9pt;font-weight:bold;color:#1e1e1e;">${escHtml(header)}</p>`
         : '';
 
       const bulletsHtml = bullets.map(b => {
@@ -189,7 +194,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       ? `<img src="${iconSrc}" width="36" height="36" style="display:block;margin:0 auto 4pt auto;" />`
       : '';
     const labelHtml = row.label.split('\n').map(
-      (part, i) => `<p style="margin:${i===0?'0':'2pt'} 0 0 0;font-size:8pt;font-weight:bold;color:${border};">${part}</p>`
+      (part, i) => `<p style="margin:${i===0?'0':'2pt'} 0 0 0;font-size:8pt;font-weight:bold;color:${border};">${escHtml(part)}</p>`
     ).join('');
 
     return `
@@ -212,7 +217,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       xmlns="http://www.w3.org/TR/REC-html40">
 <head>
 <meta charset="utf-8">
-<title>Haftalık Rapor — ${weekNum}. Hafta</title>
+<title>Haftalik Rapor - ${escHtml(String(weekNum))}. Hafta</title>
 <!--[if gte mso 9]><xml>
 <w:WordDocument>
   <w:View>Print</w:View>
@@ -234,8 +239,8 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
   <tr>
     <td width="6" style="background:#48c7c7;padding:0;">&nbsp;</td>
     <td style="background:#0f2850;padding:10pt 14pt;">
-      <p style="margin:0;font-size:${posNum>=5?'14':'12'}pt;font-weight:bold;color:white;">${headerLine1}</p>
-      <p style="margin:3pt 0 0 0;font-size:9pt;color:#82dcdc;">${headerLine2}</p>
+      <p style="margin:0;font-size:${posNum>=5?'14':'12'}pt;font-weight:bold;color:white;">${escHtml(headerLine1)}</p>
+      <p style="margin:3pt 0 0 0;font-size:9pt;color:#82dcdc;">${escHtml(headerLine2)}</p>
     </td>
   </tr>
 </table>
