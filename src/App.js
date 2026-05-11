@@ -75,7 +75,7 @@ function App() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedActionId, setSelectedActionId] = useState(null);
   const [showOnlyWithStatus, setShowOnlyWithStatus] = useState(false);
-  const [filterMyTeam, setFilterMyTeam] = useState(false);
+  const [filterMyTeam, setFilterMyTeam] = useState(true);
   const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
   const [activeCounterFilter, setActiveCounterFilter] = useState(null);
   const [editingActionId, setEditingActionId] = useState(null);
@@ -210,6 +210,7 @@ function App() {
             fullName: a.FullName || '',
             departmentName: a.DepartmentName || a.UnitName || a.LineName || '',
             departmentId: a.DepartmentID || null,
+            unitId: a.UnitID || null,
             actionItems: items.map(i => ({ type: i.ItemType, value: i.ItemValue })),
             timestamp: new Date(a.CreatedAt).toLocaleString('tr-TR'),
             statusKey: a.StatusKey || null
@@ -517,9 +518,9 @@ function App() {
         }
       }
 
-      // Apply team filter — show only actions from the user's own department
-      if (filterMyTeam && userData.DepartmentID) {
-        if (action.departmentId !== userData.DepartmentID) return;
+      // Non-EVP/GM: scope to own unit when toggle is on
+      if (userData.PositionNumber < 4 && filterMyTeam && userData.UnitID) {
+        if (action.unitId !== userData.UnitID) return;
       }
       
       if (!grouped[action.week]) {
@@ -1198,14 +1199,16 @@ function App() {
                           Rapora Eklenenler
                           {showOnlyWithStatus && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
                         </MenuItem>
-                        <MenuItem
-                          onClick={() => { setFilterMyTeam(prev => !prev); setFilterMenuAnchor(null); }}
-                          sx={{ fontSize: '0.82rem', gap: 1.5, fontWeight: filterMyTeam ? 700 : 400 }}
-                        >
-                          <People fontSize="small" sx={{ color: filterMyTeam ? '#004481' : '#9e9e9e' }} />
-                          Kendi Ekibim
-                          {filterMyTeam && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
-                        </MenuItem>
+                        {userData.PositionNumber < 4 && (
+                          <MenuItem
+                            onClick={() => { setFilterMyTeam(prev => !prev); setFilterMenuAnchor(null); }}
+                            sx={{ fontSize: '0.82rem', gap: 1.5, fontWeight: filterMyTeam ? 700 : 400 }}
+                          >
+                            <People fontSize="small" sx={{ color: filterMyTeam ? '#004481' : '#9e9e9e' }} />
+                            Kendi Birimi
+                            {filterMyTeam && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
+                          </MenuItem>
+                        )}
                       </Menu>
                     </>
                   )}
