@@ -45,7 +45,10 @@ import {
   ChevronLeft,
   ChevronRight,
   PictureAsPdf,
-  MoreHoriz
+  MoreHoriz,
+  FilterList,
+  People,
+  Done
 } from '@mui/icons-material';
 
 function App() {
@@ -72,6 +75,8 @@ function App() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedActionId, setSelectedActionId] = useState(null);
   const [showOnlyWithStatus, setShowOnlyWithStatus] = useState(false);
+  const [filterMyTeam, setFilterMyTeam] = useState(false);
+  const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
   const [activeCounterFilter, setActiveCounterFilter] = useState(null);
   const [editingActionId, setEditingActionId] = useState(null);
   const [userData, setUserData] = useState({
@@ -204,6 +209,7 @@ function App() {
             date: a.ActionDate ? a.ActionDate.split('T')[0] : '',
             fullName: a.FullName || '',
             departmentName: a.DepartmentName || a.UnitName || a.LineName || '',
+            departmentId: a.DepartmentID || null,
             actionItems: items.map(i => ({ type: i.ItemType, value: i.ItemValue })),
             timestamp: new Date(a.CreatedAt).toLocaleString('tr-TR'),
             statusKey: a.StatusKey || null
@@ -509,6 +515,11 @@ function App() {
         if (!actionStatus) {
           return; // Skip this action if it has no status
         }
+      }
+
+      // Apply team filter — show only actions from the user's own department
+      if (filterMyTeam && userData.DepartmentID) {
+        if (action.departmentId !== userData.DepartmentID) return;
       }
       
       if (!grouped[action.week]) {
@@ -1157,20 +1168,46 @@ function App() {
                 <Typography variant="h6" fontWeight={700} color="white">Ekip Aksiyonları</Typography>
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   {!(userData.PositionNumber >= 4) && (
-                    <Button
-                      variant={showOnlyWithStatus ? 'contained' : 'outlined'}
-                      size="small"
-                      onClick={toggleStatusFilter}
-                      startIcon={<Flag fontSize="small" />}
-                      sx={{
-                        fontSize: '12px', fontWeight: 600, borderRadius: 2, minWidth: 160,
-                        borderColor: 'rgba(255,255,255,0.6)', color: showOnlyWithStatus ? '#004481' : 'white',
-                        background: showOnlyWithStatus ? 'white' : 'rgba(255,255,255,0.15)',
-                        '&:hover': { background: showOnlyWithStatus ? '#f5f3ff' : 'rgba(255,255,255,0.25)', borderColor: 'white' }
-                      }}
-                    >
-                      {showOnlyWithStatus ? 'Tümünü Göster' : 'Rapora Eklenenler'}
-                    </Button>
+                    <>
+                      <Tooltip title="Filtre">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => setFilterMenuAnchor(e.currentTarget)}
+                          sx={{
+                            color: (showOnlyWithStatus || filterMyTeam) ? '#004481' : 'white',
+                            background: (showOnlyWithStatus || filterMyTeam) ? 'white' : 'rgba(255,255,255,0.15)',
+                            border: '1px solid rgba(255,255,255,0.6)',
+                            borderRadius: 2, px: 1,
+                            '&:hover': { background: (showOnlyWithStatus || filterMyTeam) ? '#f5f3ff' : 'rgba(255,255,255,0.25)' }
+                          }}
+                        >
+                          <FilterList fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Menu
+                        anchorEl={filterMenuAnchor}
+                        open={Boolean(filterMenuAnchor)}
+                        onClose={() => setFilterMenuAnchor(null)}
+                        PaperProps={{ sx: { mt: 1, minWidth: 210, borderRadius: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' } }}
+                      >
+                        <MenuItem
+                          onClick={() => { setShowOnlyWithStatus(prev => !prev); setFilterMenuAnchor(null); }}
+                          sx={{ fontSize: '0.82rem', gap: 1.5, fontWeight: showOnlyWithStatus ? 700 : 400 }}
+                        >
+                          <Flag fontSize="small" sx={{ color: showOnlyWithStatus ? '#004481' : '#9e9e9e' }} />
+                          Rapora Eklenenler
+                          {showOnlyWithStatus && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
+                        </MenuItem>
+                        <MenuItem
+                          onClick={() => { setFilterMyTeam(prev => !prev); setFilterMenuAnchor(null); }}
+                          sx={{ fontSize: '0.82rem', gap: 1.5, fontWeight: filterMyTeam ? 700 : 400 }}
+                        >
+                          <People fontSize="small" sx={{ color: filterMyTeam ? '#004481' : '#9e9e9e' }} />
+                          Kendi Ekibim
+                          {filterMyTeam && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
+                        </MenuItem>
+                      </Menu>
+                    </>
                   )}
                   <Tooltip title="Dışa Aktar">
                     <IconButton
