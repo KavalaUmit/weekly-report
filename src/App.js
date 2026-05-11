@@ -1205,7 +1205,7 @@ function App() {
                             sx={{ fontSize: '0.82rem', gap: 1.5, fontWeight: filterMyTeam ? 700 : 400 }}
                           >
                             <People fontSize="small" sx={{ color: filterMyTeam ? '#004481' : '#9e9e9e' }} />
-                            Kendi Birimi
+                            Kendi Ekibim
                             {filterMyTeam && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
                           </MenuItem>
                         )}
