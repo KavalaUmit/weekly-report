@@ -518,9 +518,9 @@ function App() {
         }
       }
 
-      // Non-EVP/GM: scope to own unit when toggle is on
-      if (userData.PositionNumber < 4 && filterMyTeam && userData.UnitID) {
-        if (action.unitId !== userData.UnitID) return;
+      // Non-EVP/GM: scope to own department when toggle is on
+      if (userData.PositionNumber < 4 && filterMyTeam && userData.DepartmentID) {
+        if (action.departmentId !== userData.DepartmentID) return;
       }
       
       if (!grouped[action.week]) {
