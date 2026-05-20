@@ -1032,7 +1032,7 @@ function App() {
                 top: '50%',
                 transform: statusPanelOpen
                   ? 'translateY(-50%) translateX(0)'
-                  : 'translateY(-50%) translateX(calc(100% - 10px))',
+                  : 'translateY(-50%) translateX(calc(100% - 30px))',
                 transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
                 zIndex: 1300,
               }}
@@ -1043,16 +1043,30 @@ function App() {
                 sx={{
                   position: 'absolute', left: 0, top: '50%',
                   transform: 'translateY(-50%)',
-                  width: 10, height: 72, cursor: 'pointer',
+                  width: 30, height: 80, cursor: 'pointer',
                   background: 'linear-gradient(180deg, #004481, #1464A0)',
-                  borderRadius: '6px 0 0 6px',
-                  boxShadow: '-2px 0 8px rgba(0,68,129,0.3)',
+                  borderRadius: '8px 0 0 8px',
+                  boxShadow: '-3px 0 12px rgba(0,68,129,0.4)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.2s, box-shadow 0.2s',
+                  animation: statusPanelOpen ? 'none' : 'pulseTab 2.5s ease-in-out infinite',
+                  '@keyframes pulseTab': {
+                    '0%':   { boxShadow: '-3px 0 12px rgba(0,68,129,0.4)' },
+                    '50%':  { boxShadow: '-3px 0 22px rgba(0,68,129,0.85)' },
+                    '100%': { boxShadow: '-3px 0 12px rgba(0,68,129,0.4)' },
+                  },
+                  '&:hover': { background: 'linear-gradient(180deg, #1565C0, #2196F3)', boxShadow: '-3px 0 18px rgba(0,68,129,0.6)' },
                 }}
-              />
+              >
+                {statusPanelOpen
+                  ? <ChevronRight sx={{ fontSize: 15, color: 'rgba(255,255,255,0.9)' }} />
+                  : <ChevronLeft  sx={{ fontSize: 15, color: 'rgba(255,255,255,0.9)' }} />
+                }
+              </Box>
 
               {/* Panel body */}
               <Box sx={{
-                ml: '10px',
+                ml: '30px',
                 background: 'white',
                 borderRadius: '12px 0 0 12px',
                 boxShadow: '-4px 0 24px rgba(0,68,129,0.18)',
@@ -1312,8 +1326,19 @@ function App() {
                                   <ListItemText
                                     primary={
                                       <Box>
-                                        {/* Header row: type chip + date */}
+                                        {/* Header row: status chip + type chip + date */}
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                          {sm && (
+                                            <Chip
+                                              label={sm.label}
+                                              size="small"
+                                              sx={{
+                                                fontWeight: 700, fontSize: '10px', flexShrink: 0,
+                                                background: sm.color, color: 'white', borderRadius: '6px',
+                                                opacity: 0.85,
+                                              }}
+                                            />
+                                          )}
                                           <Chip
                                             label={action.type}
                                             size="small"
@@ -1345,7 +1370,7 @@ function App() {
                                               {/* Main action text */}
                                               <Typography
                                                 variant="body2"
-                                                sx={{ fontWeight: 600, color: '#1a2a3a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
+                                                sx={{ fontSize: '0.9rem', color: '#1a2a3a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
                                               >
                                                 {renderBoldText(main.value)}
                                               </Typography>
@@ -1366,7 +1391,7 @@ function App() {
                                                       ) : (
                                                         <Typography
                                                           variant="body2"
-                                                          sx={{ color: '#3a4a5a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
+                                                          sx={{ fontSize: '0.9rem', color: '#3a4a5a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
                                                         >
                                                           {renderBoldText(item.value)}
                                                         </Typography>

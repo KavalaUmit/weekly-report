@@ -287,6 +287,11 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
     doc.setFontSize(9);
     const iconDataUrlMap = { highlight: highlightIconB64, lowlight: lowlightIconB64, information: informationIconB64, waiting: waitingIconB64, progress: progressIconB64 };
     const contentBottom = pageH - 15;
+
+    // If fewer than 3 bullet rows fit on current page, push section to next page
+    const forceNewPage = (contentBottom - curY) < (3 * lineH + padY + 5);
+    if (forceNewPage) curY = 15;
+
     const segments = [];
     let curSeg = { startY: curY, items: [] };
     let y = curY + padY + 5;
@@ -301,8 +306,19 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
     };
 
     typeGroups.forEach(([groupKey, bullets], gi) => {
-      const displayHeader = groupHeaderMap[groupKey] ?? '';
+      let displayHeader = groupHeaderMap[groupKey] ?? '';
       if (displayHeader) {
+        const grpType = groupKey.includes('\x00') ? groupKey.split('\x00')[0] : groupKey;
+        if (grpType === 'Üretime Alma') {
+          const idCount = bullets
+            .filter(b => b.type === 'text' && /Feature/i.test(b.value))
+            .reduce((n, b) => {
+              const m = b.value.match(/Feature\s*:?\s*([\d\s,]+)/i);
+              return n + (m ? (m[1].match(/\d+/g) || []).length : 0);
+            }, 0);
+          if (idCount > 0)
+            displayHeader = displayHeader.replace(/\s*;\s*$/, '') + ` (Σ ${idCount} Feature) ;`;
+        }
         checkBreak(headerH);
         curSeg.items.push({ kind: 'header', text: displayHeader, y });
         y += headerH;
@@ -323,9 +339,14 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
     curSeg.endY = Math.max(y + padY, curSeg.startY + minH);
     segments.push(curSeg);
 
+    // Find segment with the largest height — icon goes there only
+    const maxSegIdx = segments.reduce((best, seg, i) =>
+      (seg.endY - seg.startY) > (segments[best].endY - segments[best].startY) ? i : best, 0
+    );
+
     // ── Render pass: draw each segment ────────────────────────────────────────
     segments.forEach((seg, si) => {
-      if (si > 0) doc.addPage();
+      if (si > 0 || forceNewPage) doc.addPage();
       const segH = seg.endY - seg.startY;
 
       // Background
@@ -338,8 +359,8 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
       doc.rect(mL, seg.startY, cW, segH);
       doc.line(mL + leftCW, seg.startY, mL + leftCW, seg.startY + segH);
 
-      // Icon + label (first segment only)
-      if (si === 0) {
+      // Icon + label — only on the segment with the largest height
+      if (si === maxSegIdx) {
         const icx = mL + leftCW / 2;
         const icy = seg.startY + segH / 2 - 5;
         const cr = 9;

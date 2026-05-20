@@ -28,7 +28,7 @@ function getNextMonday(weekNumber, year) {
   const toMon   = jan1Day === 0 ? 1 : jan1Day === 1 ? 0 : 8 - jan1Day;
   const week1Mon = new Date(year, 0, 1 + toMon);
   const nextMon  = new Date(week1Mon);
-  nextMon.setDate(week1Mon.getDate() + weekNumber * 7);
+  nextMon.setDate(week1Mon.getDate() + (weekNumber - 1) * 7);
   return nextMon;
 }
 
@@ -117,7 +117,6 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
   // ── Build table rows — mirrors PDF row loop ───────────────────────────────
   const tableRows = STATUS_ROWS.map(row => {
     const matched = actions.filter(a => actionStatuses[a.id] === row.key);
-    if (!matched.length) return '';
 
     // ── Grouping — exact mirror of PDF logic ────────────────────────────────
     const byGroup        = {};
@@ -159,12 +158,26 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
 
     // ── Render content HTML ──────────────────────────────────────────────────
     const contentHtml = typeGroups.map(([groupKey], gi) => {
-      const header  = groupHeaderMap[groupKey] ?? '';
+      let header    = groupHeaderMap[groupKey] ?? '';
       const bullets = byGroup[groupKey];
       const gap     = gi < typeGroups.length - 1 ? '<p style="margin:5pt 0 0 0;font-size:4pt;">&nbsp;</p>' : '';
 
+      if (header) {
+        const grpType = groupKey.includes('\x00') ? groupKey.split('\x00')[0] : groupKey;
+        if (grpType === 'Üretime Alma') {
+          const idCount = bullets
+            .filter(b => b.type === 'text' && /Feature/i.test(b.value))
+            .reduce((n, b) => {
+              const m = b.value.match(/Feature\s*:?\s*([\d\s,]+)/i);
+              return n + (m ? (m[1].match(/\d+/g) || []).length : 0);
+            }, 0);
+          if (idCount > 0)
+            header = header.replace(/\s*;\s*$/, '') + ` (Σ ${idCount} Feature) ;`;
+        }
+      }
+
       const headerHtml = header
-        ? `<p style="margin:0 0 3pt 0;font-size:9pt;font-weight:bold;color:#1e1e1e;">${escHtml(header)}</p>`
+        ? `<p style="margin:0 0 3pt 0;font-size:11pt;font-weight:bold;color:#1e1e1e;">${escHtml(header)}</p>`
         : '';
 
       const bulletsHtml = bullets.map(b => {
@@ -180,7 +193,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
           return `<p style="margin:2pt 0;${ml}"><img src="${b.value}" width="${imgW}" height="${imgH}" style="display:block;" /></p>`;
         }
         const indent = b.isSub ? 'margin-left:14pt;' : '';
-        return `<p style="margin:1pt 0;${indent}font-size:9pt;">&bull;&nbsp;${parseBold(b.value)}</p>`;
+        return `<p style="margin:1pt 0;${indent}font-size:11pt;">&bull;&nbsp;${parseBold(b.value)}</p>`;
       }).join('');
 
       return headerHtml + bulletsHtml + gap;
@@ -194,13 +207,17 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       ? `<img src="${iconSrc}" width="36" height="36" style="display:block;margin:0 auto 4pt auto;" />`
       : '';
     const labelHtml = row.label.split('\n').map(
-      (part, i) => `<p style="margin:${i===0?'0':'2pt'} 0 0 0;font-size:8pt;font-weight:bold;color:${border};">${escHtml(part)}</p>`
+      (part, i) => `<p style="margin:${i===0?'0':'2pt'} 0 0 0;font-size:10pt;font-weight:bold;color:${border};">${escHtml(part)}</p>`
     ).join('');
 
     return `
       <tr>
-        <td width="80" style="background:${bg};border:1px solid ${border};text-align:center;vertical-align:middle;padding:8pt 4pt;">
-          ${iconImg}${labelHtml}
+        <td width="80" style="background:${bg};border:1px solid ${border};text-align:center;vertical-align:top;padding:8pt 4pt;">
+          <div style="display:table;width:100%;height:100%;text-align:center;">
+            <div style="display:table-cell;vertical-align:middle;text-align:center;">
+              ${iconImg}${labelHtml}
+            </div>
+          </div>
         </td>
         <td style="border:1px solid #c8d4e0;background:#fbfcff;padding:6pt 10pt;vertical-align:top;">
           ${contentHtml}
@@ -208,7 +225,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       </tr>`;
   }).join('');
 
-  const hasContent = STATUS_ROWS.some(r => actions.some(a => actionStatuses[a.id] === r.key));
+  const hasContent = true; // all sections always shown (empty ones render with icon only)
 
   // ── Full HTML document ────────────────────────────────────────────────────
   const html = `
@@ -227,7 +244,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
 </xml><![endif]-->
 <style>
   @page  { size:A4 portrait; margin:1.5cm 1.8cm; }
-  body   { font-family:Calibri,sans-serif; font-size:9pt; color:#222; margin:0; }
+  body   { font-family:Calibri,sans-serif; font-size:11pt; color:#222; margin:0; }
   table  { border-collapse:collapse; width:100%; }
   p      { margin:0; padding:0; }
 </style>
@@ -238,9 +255,9 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
 <table style="width:100%;border-collapse:collapse;margin-bottom:10pt;">
   <tr>
     <td width="6" style="background:#48c7c7;padding:0;">&nbsp;</td>
-    <td style="background:#0f2850;padding:10pt 14pt;">
-      <p style="margin:0;font-size:${posNum>=5?'14':'12'}pt;font-weight:bold;color:white;">${escHtml(headerLine1)}</p>
-      <p style="margin:3pt 0 0 0;font-size:9pt;color:#82dcdc;">${escHtml(headerLine2)}</p>
+    <td style="background:#0f2850;padding:10pt 14pt;border-bottom:1.5pt solid #48c7c7;${posNum>=5?'text-align:center;':''}">
+      <p style="margin:0;font-size:${posNum>=5?'17':'14'}pt;font-weight:bold;color:white;">${escHtml(headerLine1)}</p>
+      <p style="margin:3pt 0 0 0;font-size:11pt;color:#82dcdc;">${escHtml(headerLine2)}</p>
     </td>
   </tr>
 </table>
