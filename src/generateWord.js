@@ -14,6 +14,9 @@ const STATUS_ROWS = [
   { key: 'progress',    label: 'Progress',                        r:  16, g: 185, b: 129 },
 ];
 
+const AI_TABLE_HEADERS = ['Proje / İnisiyatif', 'Ne Kazandık? (AI Kullanımı)', 'Kazanım Türü', 'Güncellenen Efor (a*g)', 'Efor Kazanımı', 'TTM Kazanımı'];
+const AI_TABLE_WIDTHS = [12, 40, 12, 12, 12, 12];
+
 // ── Mirrors formatPdfDate from generatePdf.js ────────────────────────────────
 function formatPdfDate(dateStr) {
   if (!dateStr || dateStr.startsWith('1900')) return '';
@@ -46,6 +49,12 @@ function parseBold(text) {
   return escHtml(text).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 }
 
+function getMainActionText(action) {
+  const rawItems = action.actionItems?.length ? action.actionItems : [{ type: 'text', value: action.action || '' }];
+  const firstText = rawItems.find(i => typeof i === 'string' ? i.trim() : i.type === 'text' && i.value && i.value.trim());
+  return (typeof firstText === 'string' ? firstText : firstText?.value || '').trim();
+}
+
 // ── rgb(r,g,b) helper ─────────────────────────────────────────────────────────
 function rgb(r, g, b) { return `rgb(${r},${g},${b})`; }
 function rgba(r, g, b, a) { return `rgba(${r},${g},${b},${a})`; }
@@ -75,7 +84,7 @@ function loadImageSize(dataUrl) {
   });
 }
 
-export async function generateWord({ actions, actionStatuses, userData, weeks, formData }) {
+export async function generateWord({ actions, actionStatuses, userData, weeks, formData, fileName, unitSections }) {
   const weekObj  = weeks.find(w => String(w.WeekNumber) === String(formData.week));
   const weekNum  = weekObj ? weekObj.WeekNumber : formData.week;
   const nextMon  = weekObj ? getNextMonday(weekObj.WeekNumber, weekObj.Year) : new Date();
@@ -93,7 +102,8 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
   // ── Pre-load dimensions for every inline image in actions (mirrors PDF) ──
   const imgSizeCache = {};
   const allImgUrls   = new Set();
-  actions.forEach(a => (a.actionItems || []).forEach(i => {
+  const sourceActions = unitSections?.length ? unitSections.flatMap(section => section.actions || []) : actions;
+  sourceActions.forEach(a => (a.actionItems || []).forEach(i => {
     if (i.type === 'image' && i.value) allImgUrls.add(i.value);
   }));
   await Promise.all([...allImgUrls].map(async url => {
@@ -115,8 +125,8 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
   }
 
   // ── Build table rows — mirrors PDF row loop ───────────────────────────────
-  const tableRows = STATUS_ROWS.map(row => {
-    const matched = actions.filter(a => actionStatuses[a.id] === row.key);
+  const buildTableRows = (sectionActions) => STATUS_ROWS.map(row => {
+    const matched = sectionActions.filter(a => actionStatuses[a.id] === row.key);
 
     // ── Grouping — exact mirror of PDF logic ────────────────────────────────
     const byGroup        = {};
@@ -134,6 +144,19 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
         ? `${formatPdfDate(a.date)} tarihinde ${rawHeader};`
         : rawHeader;
       groupSortMap[groupKey] = a.typeSortOrder ?? 0;
+
+      if (typeName === 'AI Kazanımları') {
+        const values = [
+          a.project || '',
+          getMainActionText(a),
+          a.gainType || '',
+          a.updatedEffort || '',
+          a.effortGain || '',
+          a.ttmGain || '',
+        ];
+        if (values.some(v => String(v || '').trim())) byGroup[groupKey].push({ type: 'aiTableRow', values });
+        return;
+      }
 
       // Flatten actionItems into bullets — mirrors PDF bullet push
       (a.actionItems || []).forEach((item, idx) => {
@@ -162,8 +185,8 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       const bullets = byGroup[groupKey];
       const gap     = gi < typeGroups.length - 1 ? '<p style="margin:5pt 0 0 0;font-size:4pt;">&nbsp;</p>' : '';
 
+      const grpType = groupKey.includes('\x00') ? groupKey.split('\x00')[0] : groupKey;
       if (header) {
-        const grpType = groupKey.includes('\x00') ? groupKey.split('\x00')[0] : groupKey;
         if (grpType === 'Üretime Alma') {
           const idCount = bullets
             .filter(b => b.type === 'text' && /Feature/i.test(b.value))
@@ -179,6 +202,12 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       const headerHtml = header
         ? `<p style="margin:0 0 3pt 0;font-size:11pt;font-weight:bold;color:#1e1e1e;">${escHtml(header)}</p>`
         : '';
+
+      if (grpType === 'AI Kazanımları') {
+        const aiHeaderHtml = AI_TABLE_HEADERS.map((h, i) => `<th width="${AI_TABLE_WIDTHS[i]}%" style="border:1px solid #b8d9ec;background:#e8f4fb;color:#004481;font-size:8pt;font-weight:bold;text-align:left;padding:3pt;vertical-align:top;">${escHtml(h)}</th>`).join('');
+        const aiRowsHtml = bullets.map(b => `<tr>${b.values.map(v => `<td style="border:1px solid #d7e8f3;font-size:8pt;padding:3pt;vertical-align:top;">${parseBold(String(v || '-'))}</td>`).join('')}</tr>`).join('');
+        return `${headerHtml}<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin:2pt 0 0 0;"><tr>${aiHeaderHtml}</tr>${aiRowsHtml}</table>${gap}`;
+      }
 
       const bulletsHtml = bullets.map(b => {
         if (b.type === 'image') {
@@ -225,6 +254,13 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
       </tr>`;
   }).join('');
 
+  const unitSectionsHtml = unitSections?.length
+    ? unitSections.map(section => `
+      <p style="margin:12pt 0 5pt 0;background:#e8f4fb;border:1px solid #b8d9ec;color:#004481;font-size:13pt;font-weight:bold;padding:5pt 7pt;">${escHtml(section.unitName || 'Birim')}</p>
+      <table>${buildTableRows(section.actions || [])}</table>
+    `).join('')
+    : `<table>${buildTableRows(actions)}</table>`;
+
   const hasContent = true; // all sections always shown (empty ones render with icon only)
 
   // ── Full HTML document ────────────────────────────────────────────────────
@@ -264,7 +300,7 @@ export async function generateWord({ actions, actionStatuses, userData, weeks, f
 
 <!-- Content table -->
 ${hasContent
-  ? `<table>${tableRows}</table>`
+  ? unitSectionsHtml
   : `<p style="color:#888;font-style:italic;font-size:9pt;">Bu hafta için statülü aksiyon bulunmamaktadır.</p>`
 }
 
@@ -276,7 +312,8 @@ ${hasContent
   const url  = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href     = url;
-  link.download = `Haftalik_Rapor_H${weekNum}.doc`;
+  const name = fileName || `Haftalik_Rapor_H${weekNum}.doc`;
+  link.download = name.endsWith('.doc') ? name : `${name}.doc`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

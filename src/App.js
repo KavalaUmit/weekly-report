@@ -25,7 +25,9 @@ import {
   Menu,
   Chip,
   FormHelperText,
-  Tooltip
+  Tooltip,
+  FormControlLabel,
+  Checkbox
 } from '@mui/material';
 import {
   Save,
@@ -56,11 +58,17 @@ function App() {
     week: '',
     type: '',
     date: '',
+    project: '',
+    gainType: '',
+    updatedEffort: '',
+    effortGain: '',
+    ttmGain: '',
     actionItems: [{ type: 'text', value: '' }]
   });
   
   const [weeks, setWeeks] = useState([]);
   const [types, setTypes] = useState([]);
+  const [gainTypes, setGainTypes] = useState([]);
   const [actions, setActions] = useState([]);
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [actionStatuses, setActionStatuses] = useState({});
@@ -76,11 +84,13 @@ function App() {
   const [selectedActionId, setSelectedActionId] = useState(null);
   const [showOnlyWithStatus, setShowOnlyWithStatus] = useState(false);
   const [filterMyTeam, setFilterMyTeam] = useState(true);
+  const [showOnlyMyUnit, setShowOnlyMyUnit] = useState(true);
   const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
   const [activeCounterFilter, setActiveCounterFilter] = useState(null);
   const [editingActionId, setEditingActionId] = useState(null);
   const [userData, setUserData] = useState({
     UserID: null,
+    WindowsName: '',
     FullName: '',
     DepartmentID: null,
     DepartmentName: '',
@@ -92,6 +102,7 @@ function App() {
     PositionNumber: null
   });
   const [lines, setLines] = useState([]);
+  const [divisions, setDivisions] = useState([]);
   const [selectedLineId, setSelectedLineId] = useState(null);
   const [userError, setUserError] = useState(null);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
@@ -100,6 +111,14 @@ function App() {
   const dateInputRef = useRef(null);
   const editableRef = useRef(null);
   const subEditableRefs = useRef({});
+  const positionNumber = Number(userData.PositionNumber);
+  const isGeneralManager = positionNumber === 1;
+  const isHighLevelView = positionNumber === 1 || positionNumber === 2;
+
+  const selectedDivision = selectedLineId
+    ? divisions.find(d => String(d.DivisionId) === String(selectedLineId))
+    : divisions.find(d => d.Units?.some(u => u.UnitId === userData.UnitID));
+  const selectedDivisionContainsMyUnit = selectedDivision?.Units?.some(u => u.UnitId === userData.UnitID) ?? true;
 
   useEffect(() => {
     // Fetch user data via Windows Authentication – backend reads User.Identity.Name
@@ -120,6 +139,7 @@ function App() {
       .then(data => {
         setUserData({
           UserID: data.UserID || null,
+          WindowsName: data.WindowsName || '',
           FullName: data.FullName || '',
           DepartmentID: data.DepartmentID || null,
           DepartmentName: data.DepartmentName || '',
@@ -167,9 +187,8 @@ function App() {
         }
       });
 
-    // Load org lines for EVP/GM line picker
-    api.getLines()
-      .then(data => setLines(data))
+    api.getDivisionHierarchy()
+      .then(data => setDivisions(data || []))
       .catch(() => {});
 
     // Load action status list for StatusID lookup
@@ -191,6 +210,11 @@ function App() {
           { TypeID: null, TypeName: 'Dokümantasyon' }
         ]);
       });
+
+    // Load gain types for AI Kazanımları from backend config
+    api.getGainTypes()
+      .then(list => setGainTypes(Array.isArray(list) ? list : []))
+      .catch(() => setGainTypes(['Maliyet-Kalite']));
   }, []);
 
   const loadActionsForWeek = async (weekNumber, year, lineId = null) => {
@@ -211,6 +235,11 @@ function App() {
             departmentName: a.DepartmentName || a.UnitName || a.LineName || '',
             departmentId: a.DepartmentID || null,
             unitId: a.UnitID || null,
+            project: a.Project || '',
+            gainType: a.GainType || '',
+            updatedEffort: a.UpdatedEffort || '',
+            effortGain: a.EffortGain || '',
+            ttmGain: a.TTMGain || '',
             actionItems: items.map(i => ({ type: i.ItemType, value: i.ItemValue })),
             timestamp: new Date(a.CreatedAt).toLocaleString('tr-TR'),
             statusKey: a.StatusKey || null
@@ -221,7 +250,8 @@ function App() {
       const statuses = {};
       actionsWithItems.forEach(a => { if (a.statusKey) statuses[a.id] = a.statusKey; });
       setActionStatuses(statuses);
-      setExpandedNodes(new Set(actionsWithItems.map(a => a.week)));
+      const weekNodes = actionsWithItems.map(a => `week-${a.week}`);
+      setExpandedNodes(new Set(['unit-mine', ...weekNodes]));
     } catch (err) {
       console.error('Error loading actions:', err);
     }
@@ -232,11 +262,17 @@ function App() {
     setFormData(prev => ({ ...prev, [name]: value }));
     if (name === 'week' && value) {
       const weekObj = weeks.find(w => String(w.WeekNumber) === value);
-      const isHighLevel = userData.PositionNumber >= 4;
-      if (weekObj) loadActionsForWeek(weekObj.WeekNumber, weekObj.Year, isHighLevel ? selectedLineId : null);
+      if (weekObj) loadActionsForWeek(weekObj.WeekNumber, weekObj.Year, selectedLineId);
     }
     if (name === 'week') {
       setActiveCounterFilter(null);
+      if (editingActionId) {
+        setEditingActionId(null);
+        setFormData(prev => ({ week: value, type: '', date: '', actionItems: [{ type: 'text', value: '' }] }));
+        setErrors({ week: false, type: false, date: false, action: false });
+        if (editableRef.current) editableRef.current.textContent = '';
+        return;
+      }
     }
     if (value.trim()) {
       setErrors(prev => ({ ...prev, [name]: false }));
@@ -277,6 +313,16 @@ function App() {
           WeekID: weekObj?.WeekID,
           TypeID: typeObj?.TypeID,
           ActionDate: showDate ? formData.date : '1900-01-01',
+          LineID: userData.LineID,
+          UnitID: userData.UnitID,
+          DepartmentID: userData.DepartmentID,
+          WindowsUser: userData.WindowsName,
+          UserFullName: userData.FullName,
+          Project: formData.project || null,
+          GainType: formData.gainType || null,
+          UpdatedEffort: formData.updatedEffort || null,
+          EffortGain: formData.effortGain || null,
+          TTMGain: formData.ttmGain || null,
           actionItems
         });
       } else {
@@ -285,19 +331,29 @@ function App() {
           WeekID: weekObj?.WeekID,
           TypeID: typeObj?.TypeID,
           ActionDate: showDate ? formData.date : '1900-01-01',
+          LineID: userData.LineID,
+          UnitID: userData.UnitID,
+          DepartmentID: userData.DepartmentID,
+          WindowsUser: userData.WindowsName,
+          UserFullName: userData.FullName,
+          Project: formData.project || null,
+          GainType: formData.gainType || null,
+          UpdatedEffort: formData.updatedEffort || null,
+          EffortGain: formData.effortGain || null,
+          TTMGain: formData.ttmGain || null,
           actionItems
         });
       }
       if (weekObj) {
         await loadActionsForWeek(weekObj.WeekNumber, weekObj.Year);
-        setExpandedNodes(prev => new Set([...prev, formData.week]));
+        setExpandedNodes(prev => new Set([...prev, 'unit-mine', `week-${formData.week}`]));
       }
     } catch (err) {
       console.error('Error saving action:', err);
     }
 
     setEditingActionId(null);
-    setFormData({ week: formData.week, type: '', date: '', actionItems: [{ type: 'text', value: '' }] });
+    setFormData({ week: formData.week, type: '', date: '', project: '', gainType: '', updatedEffort: '', effortGain: '', ttmGain: '', actionItems: [{ type: 'text', value: '' }] });
     setErrors({ week: false, type: false, date: false, action: false });
     if (editableRef.current) editableRef.current.textContent = '';
   };
@@ -471,6 +527,11 @@ function App() {
       week: action.week,
       type: action.type,
       date: action.date,
+      project: action.project || '',
+      gainType: action.gainType || '',
+      updatedEffort: action.updatedEffort || '',
+      effortGain: action.effortGain || '',
+      ttmGain: action.ttmGain || '',
       actionItems: action.actionItems?.length
         ? action.actionItems.map(a => typeof a === 'string' ? { type: 'text', value: a } : a)
         : [{ type: 'text', value: action.action || '' }]
@@ -483,6 +544,11 @@ function App() {
       week: formData.week,
       type: '',
       date: '',
+      project: '',
+      gainType: '',
+      updatedEffort: '',
+      effortGain: '',
+      ttmGain: '',
       actionItems: [{ type: 'text', value: '' }]
     });
     setErrors({
@@ -496,6 +562,59 @@ function App() {
   const handlePrint = () => generatePdf({ actions, actionStatuses, userData, weeks, formData }).catch(console.error);
   const handleExportWord = () => { setExportMenuAnchor(null); generateWord({ actions, actionStatuses, userData, weeks, formData }).catch(console.error); };
   const handleExportPdf  = () => { setExportMenuAnchor(null); handlePrint(); };
+  const sanitizeFileName = (value) => String(value || '').trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_') || 'Birim';
+  const getBulkExportUnits = () => {
+    const sourceUnits = selectedDivision?.Units?.length
+      ? selectedDivision.Units
+      : divisions.flatMap(d => d.Units || []);
+    return [...new Map(sourceUnits.map(u => [u.UnitId, u])).values()]
+      .slice()
+      .sort((a, b) => String(a.UnitName || '').localeCompare(String(b.UnitName || ''), 'tr'));
+  };
+  const getUnitExportActions = (unitId) => actions.filter(action => {
+    if (excludedFromReport.has(action.id)) return false;
+    if (formData.week && action.week !== formData.week) return false;
+    return action.unitId === unitId;
+  });
+  const getBulkExportUserData = () => ({
+    ...userData,
+    UnitName: '',
+    LineID: selectedDivision?.DivisionId ?? userData.LineID,
+    LineName: selectedDivision?.DivisionName ?? userData.LineName,
+    PositionNumber: 4
+  });
+  const getBulkExportUnitSections = () => getBulkExportUnits().map(unit => ({
+    unitName: unit.UnitName,
+    actions: getUnitExportActions(unit.UnitId)
+  }));
+  const handleExportAllUnitsPdf = async () => {
+    setExportMenuAnchor(null);
+    const week = formData.week || 'X';
+    const reportName = sanitizeFileName(selectedDivision?.DivisionName || userData.LineName || 'Tum_Birimler');
+    await generatePdf({
+      actions: [],
+      actionStatuses,
+      userData: getBulkExportUserData(),
+      weeks,
+      formData,
+      unitSections: getBulkExportUnitSections(),
+      fileName: `Haftalik_Rapor_H${week}_${reportName}.pdf`
+    });
+  };
+  const handleExportAllUnitsWord = async () => {
+    setExportMenuAnchor(null);
+    const week = formData.week || 'X';
+    const reportName = sanitizeFileName(selectedDivision?.DivisionName || userData.LineName || 'Tum_Birimler');
+    await generateWord({
+      actions: [],
+      actionStatuses,
+      userData: getBulkExportUserData(),
+      weeks,
+      formData,
+      unitSections: getBulkExportUnitSections(),
+      fileName: `Haftalik_Rapor_H${week}_${reportName}.doc`
+    });
+  };
 
   const toggleStatusFilter = () => {
     setShowOnlyWithStatus(prev => !prev);
@@ -510,7 +629,7 @@ function App() {
       }
       
       // Apply status filter - EVP/GM always see only status-assigned actions
-      const forceStatusFilter = userData.PositionNumber >= 4;
+      const forceStatusFilter = isHighLevelView;
       if (showOnlyWithStatus || forceStatusFilter) {
         const actionStatus = actionStatuses[action.id];
         if (!actionStatus) {
@@ -519,7 +638,7 @@ function App() {
       }
 
       // Non-EVP/GM: scope to own department when toggle is on
-      if (userData.PositionNumber < 4 && filterMyTeam && userData.DepartmentID) {
+      if (!isHighLevelView && filterMyTeam && userData.DepartmentID) {
         if (action.departmentId !== userData.DepartmentID) return;
       }
       
@@ -533,6 +652,31 @@ function App() {
 
   const groupedActions = groupActionsByWeek();
 
+  const unitNameMap = {};
+  divisions.forEach(d => { (d.Units || []).forEach(u => { unitNameMap[u.UnitId] = u.UnitName; }); });
+
+  const groupActionsByUnitWeek = () => {
+    const myUnitId = userData.UnitID;
+    const myUnitWeeks = {};
+    const otherUnitsMap = {};
+    actions.filter(a => !excludedFromReport.has(a.id)).forEach(action => {
+      if (formData.week && action.week !== formData.week) return;
+      if ((showOnlyWithStatus || isHighLevelView) && !actionStatuses[action.id]) return;
+      const uid = action.unitId || 0;
+      if (uid === myUnitId) {
+        if (!myUnitWeeks[action.week]) myUnitWeeks[action.week] = [];
+        myUnitWeeks[action.week].push(action);
+      } else {
+        if (!otherUnitsMap[uid]) otherUnitsMap[uid] = {};
+        if (!otherUnitsMap[uid][action.week]) otherUnitsMap[uid][action.week] = [];
+        otherUnitsMap[uid][action.week].push(action);
+      }
+    });
+    return { myUnitWeeks, otherUnitsMap };
+  };
+
+  const { myUnitWeeks, otherUnitsMap } = groupActionsByUnitWeek();
+
   const statusMeta = [
     { key: 'highlight',   label: 'Highlight', color: '#ef4444', bg: '#fef2f2' },
     { key: 'lowlight',    label: 'LowLight',  color: '#6b7280', bg: '#f9fafb' },
@@ -540,6 +684,100 @@ function App() {
     { key: 'information', label: 'Info',      color: '#3b82f6', bg: '#eff6ff' },
     { key: 'progress',    label: 'Progress',  color: '#10b981', bg: '#ecfdf5' },
   ];
+
+  const renderActionItem = (action, isReadOnly) => {
+    const borderColor = getBorderColor(action.id);
+    const isEditing = editingActionId === action.id;
+    const sm = statusMeta.find(m => m.key === actionStatuses[action.id]);
+    const rawItems = action.actionItems?.length ? action.actionItems : [{ type: 'text', value: action.action || '' }];
+    const items = rawItems.map(a => typeof a === 'string' ? { type: 'text', value: a } : a);
+    const hasSubEntries = items.length > 1;
+    const main = items[0];
+    const isAiGainAction = action.type === 'AI Kazanımları';
+    return (
+      <ListItem key={action.id} sx={{ mb: 1.25, borderRadius: 3, px: 2.5, py: 1.75, cursor: isReadOnly ? 'default' : 'pointer', background: isEditing ? 'linear-gradient(135deg,#e8f4fb,#f8fcff)' : sm ? sm.bg : isReadOnly ? '#fbfcfd' : '#ffffff', border: `1px solid ${borderColor !== 'transparent' ? borderColor + '45' : '#e8eef4'}`, borderLeft: `4px solid ${isReadOnly ? '#cbd5df' : borderColor !== 'transparent' ? borderColor : '#1464A0'}`, opacity: isReadOnly ? 0.88 : 1, '&:hover': isReadOnly ? {} : { background: isEditing ? '#e1f1fb' : sm ? sm.bg : '#f4f9fd', transform: 'translateY(-1px)', boxShadow: '0 10px 24px rgba(0,68,129,0.09)' }, transition: 'all 0.18s ease', boxShadow: isEditing ? '0 10px 28px rgba(0,68,129,0.14)' : '0 1px 6px rgba(15,23,42,0.05)' }}
+        onClick={isReadOnly ? undefined : (e) => { if (window.getSelection()?.toString()) return; handleActionClick(action); }}
+        onContextMenu={isReadOnly ? undefined : (e) => handleContextMenu(e, action.id)}
+      >
+        <ListItemText primary={
+          <Box>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 0.75 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', flex: 1 }}>
+                {sm && <Chip label={sm.label} size="small" sx={{ fontWeight: 800, fontSize: '10px', flexShrink: 0, background: sm.color, color: 'white', borderRadius: '7px', height: 22, letterSpacing: 0.1 }} />}
+                <Chip label={action.type} size="small" sx={{ fontWeight: 800, fontSize: '11px', flexShrink: 0, background: isReadOnly ? '#78909c' : (sm ? sm.color : '#1464A0'), color: 'white', borderRadius: '7px', height: 22, letterSpacing: 0.1 }} />
+              </Box>
+              <Box sx={{ flexShrink: 0, textAlign: 'right', pt: 0.1 }}>
+                <Typography sx={{ fontSize: '0.72rem', fontWeight: 600, color: '#546e7a', display: 'block', lineHeight: 1.4 }}>
+                  {action.fullName || userData.FullName}{action.includeDate && action.date && !action.date.startsWith('1900') ? ` — ${action.date}` : ''}
+                </Typography>
+                {(() => { const uName = unitNameMap[action.unitId] || (action.unitId === userData.UnitID ? userData.UnitName : null); return uName ? <Typography sx={{ fontSize: '0.64rem', color: '#90a4ae', display: 'block', fontWeight: 500, lineHeight: 1.3 }}>{uName}</Typography> : null; })()}
+              </Box>
+            </Box>
+            {isAiGainAction ? (
+              <Box sx={{ mt: 1, width: '100%', overflowX: 'auto' }}>
+                <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', border: '1px solid #b8d9ec', background: '#fff' }}>
+                  <Box component="colgroup">
+                    {[12, 40, 12, 12, 12, 12].map((width, i) => (
+                      <Box component="col" key={i} sx={{ width: `${width}%` }} />
+                    ))}
+                  </Box>
+                  <Box component="thead">
+                    <Box component="tr" sx={{ background: 'linear-gradient(135deg, #e8f4fb, #f5fbff)' }}>
+                      {['Proje / İnisiyatif', 'Ne Kazandık? (AI Kullanımı)', 'Kazanım Türü', 'Güncellenen Efor (a*g)', 'Efor Kazanımı', 'TTM Kazanımı'].map((h) => (
+                        <Box component="th" key={h} sx={{ borderRight: '1px solid #b8d9ec', borderBottom: '1px solid #b8d9ec', px: 1, py: 0.8, color: '#004481', fontSize: '0.72rem', fontWeight: 800, textAlign: 'left', whiteSpace: 'normal' }}>{h}</Box>
+                      ))}
+                    </Box>
+                  </Box>
+                  <Box component="tbody">
+                    <Box component="tr">
+                      <Box component="td" sx={{ borderRight: '1px solid #d7e8f3', px: 1, py: 1, color: '#1a2d3d', fontSize: '0.78rem', lineHeight: 1.5, wordBreak: 'break-word', verticalAlign: 'top' }}>{action.project || '-'}</Box>
+                      <Box component="td" sx={{ borderRight: '1px solid #d7e8f3', px: 1, py: 1, color: '#1a2d3d', fontSize: '0.78rem', lineHeight: 1.5, wordBreak: 'break-word', verticalAlign: 'top' }}>{renderBoldText(main.value)}</Box>
+                      {[action.gainType, action.updatedEffort, action.effortGain, action.ttmGain].map((value, i) => (
+                        <Box component="td" key={i} sx={{ borderRight: '1px solid #d7e8f3', px: 1, py: 1, color: '#1a2d3d', fontSize: '0.78rem', lineHeight: 1.5, wordBreak: 'break-word', verticalAlign: 'top' }}>{value || '-'}</Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+              </Box>
+            ) : (
+              <>
+                <Typography variant="body2" sx={{ fontSize: '0.93rem', color: '#1a2d3d', lineHeight: 1.75, wordWrap: 'break-word', whiteSpace: 'normal', mt: 0.25 }}>{renderBoldText(main.value)}</Typography>
+                {hasSubEntries && (
+                  <Box sx={{ mt: 0.75, pl: 1.5, borderLeft: '2px solid #c5dff0', ml: 0.5 }}>
+                    {items.slice(1).map((item, i) => (
+                      <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75, mt: i > 0 ? 0.5 : 0 }}>
+                        <Box sx={{ width: 5, height: 5, borderRadius: '50%', background: '#1464A0', flexShrink: 0, mt: '7px' }} />
+                        {item.type === 'image'
+                          ? <Box component="img" src={item.value} alt="attachment" sx={{ maxHeight: 100, maxWidth: '100%', borderRadius: 1.5, border: '1px solid #c5dff0', mt: 0.25 }} />
+                          : <Typography variant="body2" sx={{ fontSize: '0.9rem', color: '#3a4a5a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}>{renderBoldText(item.value)}</Typography>
+                        }
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+              </>
+            )}
+          </Box>
+        } />
+      </ListItem>
+    );
+  };
+
+  const renderWeekGroup = (weekGroups, isReadOnly) => {
+    const statusOrder = ['highlight', 'lowlight', 'waiting', 'information', 'progress'];
+    const allFiltered = Object.entries(weekGroups).flatMap(([, weekActions]) =>
+      (activeCounterFilter ? weekActions.filter(a => actionStatuses[a.id] === activeCounterFilter) : weekActions)
+        .slice().sort((a, b) => {
+          const ai = statusOrder.indexOf(actionStatuses[a.id] || '');
+          const bi = statusOrder.indexOf(actionStatuses[b.id] || '');
+          return (ai === -1 ? statusOrder.length : ai) - (bi === -1 ? statusOrder.length : bi);
+        })
+    );
+    return allFiltered.map(action => renderActionItem(action, isReadOnly));
+  };
+
+  const countWeekGroupActions = (weekGroups) =>
+    Object.values(weekGroups).flat().length;
 
   const getBorderColor = (id) => {
     if (editingActionId === id) return '#1464A0';
@@ -588,27 +826,25 @@ function App() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'linear-gradient(160deg, #e8f4fb 0%, #f0fafd 100%)' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', overflowX: 'hidden', background: 'radial-gradient(circle at 20% 0%, rgba(45,204,205,0.16), transparent 28%), linear-gradient(160deg, #eef8fc 0%, #f8fcff 52%, #eaf6fb 100%)' }}>
 
       {/* ── HEADER (full width) ── */}
       <Box
         sx={{
           px: { xs: 2, sm: 3, md: 5 },
-          py: { xs: '14px', md: '28px' },
-          background: '#00447F',
+          py: { xs: '14px', md: '22px' },
+          background: 'linear-gradient(135deg, #003b73 0%, #005a9c 58%, #1464A0 100%)',
           color: 'white',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          boxShadow: '0 8px 32px rgba(0,68,129,0.35)',
+          boxShadow: '0 14px 36px rgba(0,68,129,0.28)',
           overflow: 'hidden',
           position: 'relative',
           width: '100%',
           boxSizing: 'border-box',
         }}
       >
-        <Box sx={{ position: 'absolute', right: -40, top: -40, width: 220, height: 220, borderRadius: '50%', background: 'rgba(255,255,255,0.07)' }} />
-        <Box sx={{ position: 'absolute', right: 100, bottom: -70, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
           {/* Logo */}
           <Box
@@ -625,35 +861,18 @@ function App() {
             <Typography variant="h4" fontWeight={800} letterSpacing={-0.5} sx={{ fontSize: { xs: '1.1rem', sm: '1.5rem', md: '2.125rem' } }}>
               Haftalık Rapor
             </Typography>
-            {(userData.PositionNumber === 1 || userData.PositionNumber === 2) && (
-              <>
-                <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
-                  {userData.UnitName}
-                </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.75, lineHeight: 1.6 }}>
-                  {userData.DepartmentName}
-                </Typography>
-              </>
-            )}
-            {userData.PositionNumber === 3 && (
-              <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
-                {userData.UnitName}
-              </Typography>
-            )}
-            {userData.PositionNumber === 4 && (
-              <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, lineHeight: 1.6, fontWeight: 700 }}>
-                {lines.find(l => l.LineID === selectedLineId)?.LineName || userData.LineName}
-              </Typography>
-            )}
+            <Typography sx={{ opacity: 0.9, mt: 0.5, lineHeight: 1.4, fontWeight: 700, fontSize: { xs: '0.85rem', md: '1rem' }, letterSpacing: 0.5 }}>
+              {userData.LineName}
+            </Typography>
           </Box>
         </Box>
         <Box sx={{ textAlign: 'right', zIndex: 1 }}>
           <Box sx={{ background: 'rgba(255,255,255,0.18)', borderRadius: 3, px: 3, py: 1.5, backdropFilter: 'blur(8px)' }}>
             <Typography variant="caption" sx={{ opacity: 0.85, display: 'block' }}>
-              {userData.PositionNumber >= 4 ? 'Statülü Aksiyon' : 'Toplam Aksiyon'}
+              {isHighLevelView ? 'Statülü Aksiyon' : 'Toplam Aksiyon'}
             </Typography>
             <Typography variant="h4" fontWeight={800}>
-              {userData.PositionNumber >= 4
+              {isHighLevelView
                 ? actions.filter(a => !!actionStatuses[a.id]).length
                 : actions.length}
             </Typography>
@@ -661,15 +880,15 @@ function App() {
         </Box>
       </Box>
 
-      <Container maxWidth="xl" sx={{ py: 3, px: { xs: 3, sm: 4, md: 5 }, flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <Container maxWidth="xl" sx={{ py: 3, px: { xs: 2, sm: 3, md: 4 }, flex: 1, display: 'flex', flexDirection: 'column' }}>
 
         {/* ── TWO PANES ── */}
-        <Grid container spacing={3} sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: 'flex-start', flex: 1, minHeight: 0 }}>
+        <Grid container spacing={2.5} sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: 'flex-start', flex: 1, minHeight: 0 }}>
 
           {/* LEFT PANE — hidden for EVP/GM */}
-          {!(userData.PositionNumber >= 4) && <Grid item sx={{
-            flex: { xs: '0 0 100%', md: leftPanelOpen ? '0 0 30%' : '0 0 0%' },
-            maxWidth: { xs: '100%', md: leftPanelOpen ? '30%' : '0%' },
+          {!isHighLevelView && <Grid item sx={{
+            flex: { xs: '0 0 100%', md: leftPanelOpen ? '0 0 31%' : '0 0 0%' },
+            maxWidth: { xs: '100%', md: leftPanelOpen ? '31%' : '0%' },
             width: '100%', display: 'flex',
             overflow: 'hidden',
             transition: 'flex 0.3s ease, max-width 0.3s ease',
@@ -679,12 +898,12 @@ function App() {
               sx={{
                 height: 'auto',
                 width: '100%',
-                borderRadius: 4,
+                borderRadius: 0,
                 border: '1px solid',
                 borderColor: editingActionId ? '#2DCCCD' : '#c5dff0',
                 boxShadow: editingActionId
-                  ? '0 4px 24px rgba(45,204,205,0.18)'
-                  : '0 4px 24px rgba(0,68,129,0.08)',
+                  ? '0 18px 42px rgba(45,204,205,0.18)'
+                  : '0 18px 42px rgba(0,68,129,0.10)',
                 transition: 'box-shadow 0.3s, border-color 0.3s',
                 display: 'flex',
                 flexDirection: 'column',
@@ -692,18 +911,19 @@ function App() {
             >
               <Box
                 sx={{
-                  background: userData.PositionNumber >= 4
+                  background: isHighLevelView
                     ? 'linear-gradient(90deg, #004481, #6b7280)'
                     : editingActionId
                       ? 'linear-gradient(90deg, #1464A0, #2DCCCD)'
                       : 'linear-gradient(90deg, #004481, #1464A0)',
-                  borderRadius: '16px 16px 0 0',
-                  px: 3, py: 2,
+                  borderRadius: 0,
+                  px: 2.5, py: 1.55,
+                  minHeight: 52,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 }}
               >
-                <Typography variant="h6" fontWeight={700} color="white">
-                  {userData.PositionNumber >= 4 ? 'Filtrele' : editingActionId ? 'Aksiyonu Güncelle' : 'Yeni Aksiyon Ekle'}
+                <Typography variant="h6" fontWeight={800} color="white" sx={{ fontSize: '0.96rem', letterSpacing: 0.15 }}>
+                  {isHighLevelView ? 'Filtrele' : editingActionId ? 'Aksiyonu Güncelle' : 'Yeni Aksiyon Ekle'}
                 </Typography>
                 <Tooltip title="Paneli Gizle">
                   <IconButton size="small" onClick={() => setLeftPanelOpen(false)} sx={{ color: 'rgba(255,255,255,0.8)', '&:hover': { color: 'white', background: 'rgba(255,255,255,0.15)' } }}>
@@ -712,8 +932,8 @@ function App() {
                 </Tooltip>
               </Box>
 
-              <CardContent sx={{ px: 3, pt: 2, pb: 2, display: 'flex', flexDirection: 'column', '&:last-child': { pb: 2 } }}>
-                <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column' }}>
+              <CardContent sx={{ px: 3, pt: 2.5, pb: 2.5, display: 'flex', flexDirection: 'column', background: 'linear-gradient(180deg,#ffffff 0%,#fbfdff 100%)', '&:last-child': { pb: 2.5 } }}>
+                <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                   <FormControl fullWidth margin="normal" error={errors.week}>
                     <InputLabel>Hafta</InputLabel>
                     <Select
@@ -721,7 +941,7 @@ function App() {
                       value={formData.week}
                       onChange={handleInputChange}
                       label="Hafta"
-                      sx={{ borderRadius: 2, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#1464A0' } }}
+                      sx={{ borderRadius: 2.5, background: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#d7e3ec' }, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#1464A0', borderWidth: 2 } }}
                     >
                       <MenuItem value=""><em>Hafta seçin...</em></MenuItem>
                       {weeks.map((week, index) => (
@@ -731,27 +951,7 @@ function App() {
                     {errors.week && <FormHelperText>Lütfen hafta seçin</FormHelperText>}
                   </FormControl>
 
-                  {/* Line picker — only for EVP (4) and GM (5) */}
-                  {userData.PositionNumber >= 4 && (
-                    <FormControl fullWidth margin="normal">
-                      <InputLabel>Hat</InputLabel>
-                      <Select
-                        value={selectedLineId || ''}
-                        onChange={(e) => handleLineChange(e.target.value || null)}
-                        label="Hat"
-                        sx={{ borderRadius: 2 }}
-                      >
-                        {userData.PositionNumber === 5 && (
-                          <MenuItem value=""><em>Tüm Hatlar</em></MenuItem>
-                        )}
-                        {lines.map(line => (
-                          <MenuItem key={line.LineID} value={line.LineID}>{line.LineName}</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  )}
-
-                  {userData.PositionNumber < 4 && (<>
+                  {!isHighLevelView && (<>
                   <FormControl fullWidth margin="normal" error={errors.type}>
                     <InputLabel>Tür</InputLabel>
                     <Select
@@ -759,7 +959,7 @@ function App() {
                       value={formData.type}
                       onChange={handleInputChange}
                       label="Tür"
-                      sx={{ borderRadius: 2 }}
+                      sx={{ borderRadius: 2.5, background: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#d7e3ec' } }}
                     >
                       <MenuItem value=""><em>Tür seçin...</em></MenuItem>
                       {types.map((type, index) => (
@@ -784,6 +984,46 @@ function App() {
                       )
                     }}
                   />
+                  )}
+
+                  {formData.type === 'AI Kazanımları' && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        fullWidth margin="dense" name="project" label="Proje"
+                        value={formData.project} onChange={handleInputChange}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                      <FormControl fullWidth margin="dense">
+                        <InputLabel>Kazanım Türü</InputLabel>
+                        <Select
+                          name="gainType"
+                          label="Kazanım Türü"
+                          value={formData.gainType}
+                          onChange={handleInputChange}
+                          sx={{ borderRadius: 2, background: '#fff' }}
+                        >
+                          <MenuItem value=""><em>Seçin...</em></MenuItem>
+                          {gainTypes.map((gt, i) => (
+                            <MenuItem key={i} value={gt}>{gt}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <TextField
+                        fullWidth margin="dense" name="updatedEffort" label="Güncellenen Efor"
+                        value={formData.updatedEffort} onChange={handleInputChange}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                      <TextField
+                        fullWidth margin="dense" name="effortGain" label="Efor Kazanımı"
+                        value={formData.effortGain} onChange={handleInputChange}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                      <TextField
+                        fullWidth margin="dense" name="ttmGain" label="TTM Kazanımı"
+                        value={formData.ttmGain} onChange={handleInputChange}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                    </Box>
                   )}
 
                   <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column' }}>
@@ -812,20 +1052,22 @@ function App() {
                         onPaste={handleContentPaste}
                         sx={{
                           flex: 1,
-                          minHeight: 130,
-                          border: errors.action ? '1px solid #d32f2f' : '1px solid rgba(0,0,0,0.23)',
-                          borderRadius: 2,
-                          px: '14px', py: '12px',
+                          minHeight: 140,
+                          border: errors.action ? '1px solid #d32f2f' : '1px solid #d7e3ec',
+                          borderRadius: 2.5,
+                          px: '16px', py: '14px',
                           outline: 'none',
                           fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
-                          fontSize: '0.75rem',
-                          lineHeight: 1.6,
-                          color: 'rgba(0,0,0,0.87)',
+                          fontSize: '0.86rem',
+                          lineHeight: 1.75,
+                          color: '#172b3a',
+                          background: '#fff',
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-word',
                           overflowY: 'auto',
                           cursor: 'text',
-                          '&:focus': { borderColor: errors.action ? '#d32f2f' : '#1464A0', borderWidth: '2px', px: '13px', py: '11px' },
+                          boxShadow: 'inset 0 1px 2px rgba(15,23,42,0.03)',
+                          '&:focus': { borderColor: errors.action ? '#d32f2f' : '#1464A0', borderWidth: '2px', px: '15px', py: '13px', boxShadow: '0 0 0 4px rgba(20,100,160,0.08)' },
                           '& strong, & b': { fontWeight: 700 },
                           '&:empty::before': { content: '"Aksiyon detayını yazın..."', color: 'rgba(0,0,0,0.42)', pointerEvents: 'none' },
                         }}
@@ -971,30 +1213,31 @@ function App() {
                     </Box>
                   </Box>
 
-                  <Button
-                    type="submit" variant="contained" fullWidth
-                    startIcon={<Save />}
-                    sx={{
-                      mt: 2, py: 1.3, borderRadius: 2, fontWeight: 700, fontSize: '15px',
-                      background: editingActionId
-                        ? 'linear-gradient(135deg, #1464A0, #2DCCCD)'
-                        : 'linear-gradient(135deg, #004481, #1464A0)',
-                      boxShadow: '0 4px 14px rgba(0,68,129,0.4)',
-                      '&:hover': { boxShadow: '0 6px 20px rgba(0,68,129,0.55)', transform: 'translateY(-1px)' },
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {editingActionId ? 'Güncelle' : 'Kaydet'}
-                  </Button>
-
-                  {editingActionId && (
+                  <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
                     <Button
-                      variant="outlined" fullWidth onClick={handleCancelEdit}
-                      sx={{ mt: 1, borderRadius: 2, fontWeight: 600, borderColor: '#1464A0', color: '#1464A0' }}
+                      type="submit" variant="contained"
+                      startIcon={<Save sx={{ fontSize: '16px !important' }} />}
+                      sx={{
+                        flex: 1, py: 0.9, borderRadius: 2, fontWeight: 700, fontSize: '13px',
+                        background: editingActionId
+                          ? 'linear-gradient(135deg, #1464A0, #2DCCCD)'
+                          : 'linear-gradient(135deg, #004481, #1464A0)',
+                        boxShadow: '0 3px 10px rgba(0,68,129,0.35)',
+                        '&:hover': { boxShadow: '0 5px 16px rgba(0,68,129,0.5)', transform: 'translateY(-1px)' },
+                        transition: 'all 0.2s',
+                      }}
                     >
-                      İptal
+                      {editingActionId ? 'Güncelle' : 'Kaydet'}
                     </Button>
-                  )}
+                    {editingActionId && (
+                      <Button
+                        variant="outlined" onClick={handleCancelEdit}
+                        sx={{ flex: 1, py: 0.9, borderRadius: 2, fontWeight: 600, fontSize: '13px', borderColor: '#1464A0', color: '#1464A0', '&:hover': { background: '#e8f4fb' } }}
+                      >
+                        İptal
+                      </Button>
+                    )}
+                  </Box>
                   </>)}
                 </Box>
               </CardContent>
@@ -1002,10 +1245,10 @@ function App() {
           </Grid>}
 
           {/* RIGHT PANE */}
-          <Grid item sx={{ flex: { xs: '0 0 100%', md: (userData.PositionNumber >= 4 || !leftPanelOpen) ? '0 0 100%' : '0 0 70%' }, maxWidth: { xs: '100%', md: (userData.PositionNumber >= 4 || !leftPanelOpen) ? '100%' : '70%' }, width: '100%', display: 'flex', flexDirection: 'column', transition: 'flex 0.3s ease, max-width 0.3s ease', position: 'relative' }}>
+          <Grid item sx={{ flex: { xs: '0 0 100%', md: (isHighLevelView || !leftPanelOpen) ? '0 0 100%' : '0 0 69%' }, maxWidth: { xs: '100%', md: (isHighLevelView || !leftPanelOpen) ? '100%' : '69%' }, width: '100%', display: 'flex', flexDirection: 'column', transition: 'flex 0.3s ease, max-width 0.3s ease', position: 'relative', pr: { md: '38px' } }}>
 
             {/* Re-open panel tab — only for non-EVP/GM */}
-            {!leftPanelOpen && !(userData.PositionNumber >= 4) && (
+            {!leftPanelOpen && !isHighLevelView && (
               <Tooltip title="Formu Aç" placement="right">
                 <IconButton
                   onClick={() => setLeftPanelOpen(true)}
@@ -1073,7 +1316,7 @@ function App() {
                 border: '1px solid #c5dff0',
                 borderRight: 'none',
                 overflow: 'hidden',
-                minWidth: 180,
+                minWidth: 240,
               }}>
                 {/* Header */}
                 <Box sx={{ background: 'linear-gradient(135deg, #004481, #1464A0)', px: 2, py: 1.2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1086,7 +1329,7 @@ function App() {
                 </Box>
 
                 {/* Filter controls inside panel */}
-                <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <FormControl size="small" fullWidth>
                     <InputLabel sx={{ fontSize: '11px' }}>Hafta</InputLabel>
                     <Select
@@ -1105,23 +1348,36 @@ function App() {
                     </Select>
                   </FormControl>
 
-                  {userData.PositionNumber >= 4 && (
-                    <FormControl size="small" fullWidth>
-                      <InputLabel sx={{ fontSize: '11px' }}>Line</InputLabel>
-                      <Select
-                        value={selectedLineId || ''}
-                        onChange={(e) => handleLineChange(e.target.value || null)}
-                        label="Line"
-                        sx={{ fontSize: '11px', borderRadius: 1.5 }}
-                      >
-                        {userData.PositionNumber === 5 && (
-                          <MenuItem value=""><em style={{ fontSize: '11px' }}>Tüm Hatlar</em></MenuItem>
-                        )}
-                        {lines.map(line => (
-                          <MenuItem key={line.LineID} value={line.LineID} sx={{ fontSize: '11px' }}>{line.LineName}</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel sx={{ fontSize: '11px' }}>Bölüm</InputLabel>
+                    <Select
+                      value={selectedLineId || ''}
+                      onChange={(e) => handleLineChange(e.target.value || null)}
+                      label="Bölüm"
+                      sx={{ fontSize: '11px', borderRadius: 1.5 }}
+                    >
+                      <MenuItem value=""><em style={{ fontSize: '11px' }}>Tüm Bölümler</em></MenuItem>
+                      {divisions.map(d => (
+                        <MenuItem key={d.DivisionId} value={d.DivisionId} sx={{ fontSize: '11px' }}>{d.DivisionName}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+
+                  {!isHighLevelView && selectedDivisionContainsMyUnit && (
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={showOnlyMyUnit}
+                          onChange={(e) => setShowOnlyMyUnit(e.target.checked)}
+                          size="small"
+                          sx={{ color: '#1464A0', '&.Mui-checked': { color: '#004481' }, py: 0.25 }}
+                        />
+                      }
+                      label={
+                        <Typography sx={{ fontSize: '11px', fontWeight: showOnlyMyUnit ? 700 : 400, color: showOnlyMyUnit ? '#004481' : '#546e7a' }}>Kendi Birimim</Typography>
+                      }
+                      sx={{ mx: 0, mt: 0.5 }}
+                    />
                   )}
                 </Box>
 
@@ -1130,7 +1386,7 @@ function App() {
                 {/* Counters — vertical */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, p: 1 }}>
                   {/* Toplam — hidden for EVP/GM */}
-                  {!(userData.PositionNumber >= 4) && (
+                  {!(isHighLevelView) && (
                   <Box
                     onClick={() => setActiveCounterFilter(null)}
                     sx={{
@@ -1177,18 +1433,23 @@ function App() {
               </Box>
             </Box>
 
-            {/* Ekip Aksiyonları */}
-            <Card elevation={0} className="print-section" sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid #c5dff0', boxShadow: '0 4px 24px rgba(0,68,129,0.08)' }}>
-              <Box sx={{ background: 'linear-gradient(90deg, #004481, #1464A0)', borderRadius: '16px 16px 0 0', px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="h6" fontWeight={700} color="white">Ekip Aksiyonları</Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  {!(userData.PositionNumber >= 4) && (
+            {/* Ekip Aksiyonları — own unit card, only when selected division contains user's unit */}
+            {selectedDivisionContainsMyUnit && <Card elevation={0} className="print-section" sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 0, border: '1px solid rgba(174,214,241,0.85)', boxShadow: '0 18px 44px rgba(0,68,129,0.10)', overflow: 'hidden', background: '#fff' }}>
+              <Box sx={{ background: 'linear-gradient(135deg, #004481 0%, #075c98 58%, #1464A0 100%)', px: 2.5, py: 1.35, minHeight: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.1 }}>
+                  <Typography variant="h6" fontWeight={800} color="white" sx={{ fontSize: '0.9rem', letterSpacing: 0.2, lineHeight: 1.2 }}>{userData.UnitName || 'Ekip Aksiyonları'}</Typography>
+                  {countWeekGroupActions(myUnitWeeks) > 0 && <Chip label={`${countWeekGroupActions(myUnitWeeks)} aksiyon`} size="small" sx={{ fontWeight: 800, fontSize: '10px', height: 21, background: 'rgba(255,255,255,0.16)', color: 'white', border: '1px solid rgba(255,255,255,0.22)', '& .MuiChip-label': { px: 1 } }} />}
+                </Box>
+                <Box sx={{ display: 'flex', gap: 0.75 }}>
+                  {!(isHighLevelView) && (
                     <>
                       <Tooltip title="Filtre">
                         <IconButton
                           size="small"
                           onClick={(e) => setFilterMenuAnchor(e.currentTarget)}
                           sx={{
+                            width: 30,
+                            height: 30,
                             color: (showOnlyWithStatus || filterMyTeam) ? '#004481' : 'white',
                             background: (showOnlyWithStatus || filterMyTeam) ? 'white' : 'rgba(255,255,255,0.15)',
                             border: '1px solid rgba(255,255,255,0.6)',
@@ -1213,7 +1474,7 @@ function App() {
                           Rapora Eklenenler
                           {showOnlyWithStatus && <Done fontSize="small" sx={{ ml: 'auto', color: '#004481' }} />}
                         </MenuItem>
-                        {userData.PositionNumber < 4 && (
+                        {!isHighLevelView && (
                           <MenuItem
                             onClick={() => { setFilterMyTeam(prev => !prev); setFilterMenuAnchor(null); }}
                             sx={{ fontSize: '0.82rem', gap: 1.5, fontWeight: filterMyTeam ? 700 : 400 }}
@@ -1231,7 +1492,7 @@ function App() {
                       size="small"
                       className="no-print"
                       onClick={(e) => setExportMenuAnchor(e.currentTarget)}
-                      sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, px: 1, '&:hover': { background: 'rgba(255,255,255,0.2)' } }}
+                      sx={{ width: 30, height: 30, color: 'white', border: '1px solid rgba(255,255,255,0.45)', borderRadius: 2, px: 1, background: 'rgba(255,255,255,0.08)', '&:hover': { background: 'rgba(255,255,255,0.2)' } }}
                     >
                       <MoreHoriz fontSize="small" />
                     </IconButton>
@@ -1248,13 +1509,20 @@ function App() {
                     <MenuItem onClick={handleExportWord} sx={{ fontSize: '0.75rem', gap: 1.5 }}>
                       <WordIcon fontSize="small" sx={{ color: '#1565c0' }} /> Word'e Çevir
                     </MenuItem>
+                    <Divider />
+                    <MenuItem onClick={handleExportAllUnitsPdf} sx={{ fontSize: '0.75rem', gap: 1.5 }}>
+                      <PictureAsPdf fontSize="small" sx={{ color: '#c62828' }} /> Tüm Birimler PDF
+                    </MenuItem>
+                    <MenuItem onClick={handleExportAllUnitsWord} sx={{ fontSize: '0.75rem', gap: 1.5 }}>
+                      <WordIcon fontSize="small" sx={{ color: '#1565c0' }} /> Tüm Birimler Word
+                    </MenuItem>
                   </Menu>
                 </Box>
               </Box>
 
-              <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', px: 2, pt: 2 }}>
-                {actions.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 6, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', px: 2, pt: 2, pb: 2.25, background: 'linear-gradient(180deg,#ffffff 0%,#fbfdff 100%)', '&:last-child': { pb: 2.25 } }}>
+                {Object.keys(myUnitWeeks).length === 0 ? (
+                  <Box sx={{ textAlign: 'center', py: 7, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                     <Box sx={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg, #cce4f5, #e8f4fb)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
                       <Article sx={{ fontSize: 36, color: '#1464A0' }} />
                     </Box>
@@ -1262,162 +1530,36 @@ function App() {
                     <Typography variant="body2" color="text.disabled" sx={{ mt: 0.5 }}>Yeni bir aksiyon ekleyerek başlayın</Typography>
                   </Box>
                 ) : (
-                  <List disablePadding>
-                    {Object.entries(groupedActions).map(([week, weekActions]) => {
-                      const statusOrder = ['highlight', 'lowlight', 'waiting', 'information', 'progress'];
-                      const filteredWeekActions = (activeCounterFilter
-                        ? weekActions.filter(a => actionStatuses[a.id] === activeCounterFilter)
-                        : weekActions
-                      ).slice().sort((a, b) => {
-                        const ai = statusOrder.indexOf(actionStatuses[a.id] || '');
-                        const bi = statusOrder.indexOf(actionStatuses[b.id] || '');
-                        return (ai === -1 ? statusOrder.length : ai) - (bi === -1 ? statusOrder.length : bi);
-                      });
-                      if (filteredWeekActions.length === 0) return null;
-                      return (
-                      <Box key={week} sx={{ mb: 1 }}>
-                        <ListItem
-                          button
-                          onClick={() => toggleNode(week)}
-                          sx={{
-                            borderRadius: 3,
-                            mb: 0.5,
-                            background: 'linear-gradient(90deg, #e8f4fb, #d6eef9)',
-                            border: '1px solid #aed6f1',
-                            '&:hover': { background: 'linear-gradient(90deg, #cce4f5, #b8d8f0)' },
-                            transition: 'background 0.2s',
-                          }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-                            <Box sx={{ width: 10, height: 10, borderRadius: '50%', background: 'linear-gradient(135deg, #004481, #1464A0)', flexShrink: 0 }} />
-                            <Typography fontWeight={700} color="#004481">
-                              {week}. Hafta
-                            </Typography>
-                            <Chip label={`${weekActions.length} aksiyon`} size="small" sx={{ ml: 0.5, fontWeight: 600, fontSize: '11px', background: '#004481', color: 'white' }} />
-                          </Box>
-                          {expandedNodes.has(week)
-                            ? <ExpandLess sx={{ color: '#1464A0' }} />
-                            : <ExpandMore sx={{ color: '#1464A0' }} />}
-                        </ListItem>
-
-                        <Collapse in={expandedNodes.has(week)} timeout="auto" unmountOnExit>
-                          <List component="div" disablePadding sx={{ pl: 1 }}>
-                            {filteredWeekActions.map(action => {
-                              const borderColor = getBorderColor(action.id);
-                              const isEditing = editingActionId === action.id;
-                              const sm = statusMeta.find(m => m.key === actionStatuses[action.id]);
-                              return (
-                                <ListItem
-                                  key={action.id}
-                                  sx={{
-                                    mb: 0.75,
-                                    borderRadius: 2,
-                                    cursor: 'pointer',
-                                    background: isEditing ? '#e8f4fb' : sm ? sm.bg : 'white',
-                                    border: `1px solid ${borderColor !== 'transparent' ? borderColor + '50' : '#f0f0f0'}`,
-                                    borderLeft: `4px solid ${borderColor}`,
-                                    '&:hover': { background: isEditing ? '#cce4f5' : sm ? sm.bg : '#fafafa', transform: 'translateX(2px)' },
-                                    transition: 'all 0.15s',
-                                    boxShadow: isEditing ? '0 2px 8px rgba(0,68,129,0.15)' : 'none',
-                                  }}
-                                  onClick={(e) => { if (window.getSelection()?.toString()) return; handleActionClick(action); }}
-                                  onContextMenu={(e) => handleContextMenu(e, action.id)}
-                                >
-                                  <ListItemText
-                                    primary={
-                                      <Box>
-                                        {/* Header row: status chip + type chip + date */}
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                          {sm && (
-                                            <Chip
-                                              label={sm.label}
-                                              size="small"
-                                              sx={{
-                                                fontWeight: 700, fontSize: '10px', flexShrink: 0,
-                                                background: sm.color, color: 'white', borderRadius: '6px',
-                                                opacity: 0.85,
-                                              }}
-                                            />
-                                          )}
-                                          <Chip
-                                            label={action.type}
-                                            size="small"
-                                            sx={{
-                                              fontWeight: 700, fontSize: '11px', flexShrink: 0,
-                                              background: sm ? sm.color : '#1464A0',
-                                              color: 'white', borderRadius: '6px',
-                                            }}
-                                          />
-                                          <Box sx={{ ml: 'auto', flexShrink: 0, textAlign: 'right' }}>
-                                            <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic', display: 'block' }}>
-                                              {action.fullName || userData.FullName}{action.includeDate && action.date && !action.date.startsWith('1900') ? ` — ${action.date}` : ''}
-                                            </Typography>
-                                            {(action.departmentName) && (
-                                              <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', display: 'block' }}>
-                                                {action.departmentName}
-                                              </Typography>
-                                            )}
-                                          </Box>
-                                        </Box>
-
-                                        {(() => {
-                                          const rawItems = action.actionItems?.length ? action.actionItems : [{ type: 'text', value: action.action || '' }];
-                                          const items = rawItems.map(a => typeof a === 'string' ? { type: 'text', value: a } : a);
-                                          const hasSubEntries = items.length > 1;
-                                          const main = items[0];
-                                          return (
-                                            <Box>
-                                              {/* Main action text */}
-                                              <Typography
-                                                variant="body2"
-                                                sx={{ fontSize: '0.9rem', color: '#1a2a3a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
-                                              >
-                                                {renderBoldText(main.value)}
-                                              </Typography>
-
-                                              {/* Sub-entries with vertical connector line */}
-                                              {hasSubEntries && (
-                                                <Box sx={{ mt: 0.75, pl: 1.5, borderLeft: '2px solid #c5dff0', ml: 0.5 }}>
-                                                  {items.slice(1).map((item, i) => (
-                                                    <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75, mt: i > 0 ? 0.5 : 0 }}>
-                                                      <Box sx={{ width: 5, height: 5, borderRadius: '50%', background: '#1464A0', flexShrink: 0, mt: '7px' }} />
-                                                      {item.type === 'image' ? (
-                                                        <Box
-                                                          component="img"
-                                                          src={item.value}
-                                                          alt="attachment"
-                                                          sx={{ maxHeight: 100, maxWidth: '100%', borderRadius: 1.5, border: '1px solid #c5dff0', mt: 0.25 }}
-                                                        />
-                                                      ) : (
-                                                        <Typography
-                                                          variant="body2"
-                                                          sx={{ fontSize: '0.9rem', color: '#3a4a5a', lineHeight: 1.6, wordWrap: 'break-word', whiteSpace: 'normal' }}
-                                                        >
-                                                          {renderBoldText(item.value)}
-                                                        </Typography>
-                                                      )}
-                                                    </Box>
-                                                  ))}
-                                                </Box>
-                                              )}
-                                            </Box>
-                                          );
-                                        })()}
-                                      </Box>
-                                    }
-                                  />
-                                </ListItem>
-                              );
-                            })}
-                          </List>
-                        </Collapse>
-                      </Box>
-                    );
-                  })}
-                  </List>
+                  <List disablePadding>{renderWeekGroup(myUnitWeeks, false)}</List>
                 )}
               </CardContent>
-            </Card>
+            </Card>}
+
+            {/* Other unit cards — read-only, units from selected division */}
+            {(isHighLevelView || !showOnlyMyUnit || !selectedDivisionContainsMyUnit) &&
+              (selectedDivision?.Units || []).filter(u => u.UnitId !== userData.UnitID)
+              .map(u => {
+                const weekGroups = otherUnitsMap[u.UnitId] || {};
+                const total = Object.values(weekGroups).flat().length;
+                return (
+                  <Card key={u.UnitId} elevation={0} sx={{ mt: 2, borderRadius: 0, border: '1px solid #d9e2e8', boxShadow: '0 12px 32px rgba(15,23,42,0.07)', overflow: 'hidden', background: '#fff' }}>
+                    <Box sx={{ background: 'linear-gradient(135deg,#526f7b,#78909c)', px: 2.5, py: 1.35, minHeight: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.1 }}>
+                        <Typography variant="h6" fontWeight={800} color="white" sx={{ fontSize: '0.9rem', letterSpacing: 0.2, lineHeight: 1.2 }}>{u.UnitName}</Typography>
+                        {total > 0 && <Chip label={`${total} aksiyon`} size="small" sx={{ fontWeight: 800, fontSize: '10px', height: 21, background: 'rgba(255,255,255,0.18)', color: 'white', border: '1px solid rgba(255,255,255,0.22)', '& .MuiChip-label': { px: 1 } }} />}
+                      </Box>
+                      <Chip label="Salt Okunur" size="small" sx={{ fontWeight: 700, fontSize: '10px', height: 22, background: 'rgba(255,255,255,0.14)', color: 'white', border: '1px solid rgba(255,255,255,0.34)', '& .MuiChip-label': { px: 1 } }} />
+                    </Box>
+                    <CardContent sx={{ px: 2, pt: 2, pb: 2.25, background: 'linear-gradient(180deg,#ffffff 0%,#fbfdff 100%)', '&:last-child': { pb: 2.25 } }}>
+                      {total === 0
+                        ? <Typography variant="body2" color="text.disabled" sx={{ py: 3, textAlign: 'center', fontStyle: 'italic' }}>Bu hafta aksiyon yok</Typography>
+                        : <List disablePadding>{renderWeekGroup(weekGroups, true)}</List>
+                      }
+                    </CardContent>
+                  </Card>
+                );
+              })
+            }
           </Grid>
         </Grid>
 

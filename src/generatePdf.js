@@ -8,6 +8,15 @@ const STATUS_ROWS = [
   { key: 'progress',    label: 'Progress',                      r:  16, g: 185, b: 129 },
 ];
 
+const AI_TABLE_HEADERS = ['Proje / İnisiyatif', 'Ne Kazandık? (AI Kullanımı)', 'Kazanım Türü', 'Güncellenen Efor (a*g)', 'Efor Kazanımı', 'TTM Kazanımı'];
+const AI_TABLE_WIDTHS = [12, 40, 12, 12, 12, 12];
+
+function getMainActionText(action) {
+  const rawItems = action.actionItems?.length ? action.actionItems : [{ type: 'text', value: action.action || '' }];
+  const firstText = rawItems.find(i => typeof i === 'string' ? i.trim() : i.type === 'text' && i.value && i.value.trim());
+  return (typeof firstText === 'string' ? firstText : firstText?.value || '').trim();
+}
+
 // Returns the Monday of weekNumber in the given year
 function getWeekMonday(weekNumber, year) {
   const jan1     = new Date(year, 0, 1);
@@ -137,7 +146,7 @@ function loadIconAsPng(url) {
   });
 }
 
-export async function generatePdf({ actions, actionStatuses, userData, weeks, formData }) {
+export async function generatePdf({ actions, actionStatuses, userData, weeks, formData, fileName, unitSections }) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   // ─── LOAD CALIBRI FONTS ────────────────────────────────────────────────────
@@ -168,7 +177,8 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   // ─── PRE-LOAD INLINE IMAGE DIMENSIONS ───────────────────────────────────────
   const imgRatioCache = {};
   const allImgUrls = new Set();
-  actions.forEach(a => (a.actionItems || []).forEach(i => { if (i.type === 'image' && i.value) allImgUrls.add(i.value); }));
+  const sourceActions = unitSections?.length ? unitSections.flatMap(section => section.actions || []) : actions;
+  sourceActions.forEach(a => (a.actionItems || []).forEach(i => { if (i.type === 'image' && i.value) allImgUrls.add(i.value); }));
   await Promise.all([...allImgUrls].map(async url => {
     imgRatioCache[url] = (await loadImageDimensions(url)).ratio;
   }));
@@ -246,10 +256,13 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   const maxTextW = rightCW - padX * 2;
   const maxImgW   = maxTextW;
   const maxImgH   = 40; // mm — max image height in PDF
+  const aiTablePad = 1.2;
+  const aiTableLineH = 3.2;
 
+  const renderActionsBlock = (blockActions) => {
   for (const row of STATUS_ROWS) {
     // Collect status-matching actions
-    const matched = actions.filter(a => actionStatuses[a.id] === row.key);
+    const matched = blockActions.filter(a => actionStatuses[a.id] === row.key);
 
     // Group by type+date when IncludeDate=true & Header non-empty, else by type only
     const byGroup = {};
@@ -265,6 +278,18 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
         ? `${formatPdfDate(a.date)} tarihinde ${rawHeader};`
         : rawHeader;
       groupSortMap[groupKey] = a.typeSortOrder ?? 0;
+      if (typeName === 'AI Kazanımları') {
+        const values = [
+          a.project || '',
+          getMainActionText(a),
+          a.gainType || '',
+          a.updatedEffort || '',
+          a.effortGain || '',
+          a.ttmGain || '',
+        ];
+        if (values.some(v => String(v || '').trim())) byGroup[groupKey].push({ type: 'aiTableRow', values });
+        return;
+      }
       (a.actionItems || []).forEach((i, idx) => {
         if (!((i.type === 'text' && i.value && i.value.trim()) || (i.type === 'image' && i.value))) return;
         byGroup[groupKey].push(
@@ -307,8 +332,8 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
 
     typeGroups.forEach(([groupKey, bullets], gi) => {
       let displayHeader = groupHeaderMap[groupKey] ?? '';
+      const grpType = groupKey.includes('\x00') ? groupKey.split('\x00')[0] : groupKey;
       if (displayHeader) {
-        const grpType = groupKey.includes('\x00') ? groupKey.split('\x00')[0] : groupKey;
         if (grpType === 'Üretime Alma') {
           const idCount = bullets
             .filter(b => b.type === 'text' && /Feature/i.test(b.value))
@@ -323,17 +348,36 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
         curSeg.items.push({ kind: 'header', text: displayHeader, y });
         y += headerH;
       }
-      bullets.forEach(b => {
-        const indent = b.isSub ? subIndent : 0;
-        const bX = mL + leftCW + padX + indent;
-        const bW = maxTextW - indent;
-        const itemH = b.type === 'image'
-          ? Math.min(maxImgH, maxImgW / (imgRatioCache[b.value] || 1)) + lineH
-          : measureBoldLines(doc, '• ' + b.value, bW) * lineH + bulletGap;
-        checkBreak(itemH);
-        curSeg.items.push({ kind: 'bullet', b, bX, bW, y, itemH });
-        y += itemH;
-      });
+      if (grpType === 'AI Kazanımları') {
+        const tableX = mL + leftCW + padX;
+        const colWidths = AI_TABLE_WIDTHS.map(w => maxTextW * w / 100);
+        doc.setFont('Calibri', 'bold');
+        doc.setFontSize(6.2);
+        const headerRowH = Math.max(...AI_TABLE_HEADERS.map((h, i) => doc.splitTextToSize(h, colWidths[i] - aiTablePad * 2).length)) * aiTableLineH + aiTablePad * 2;
+        checkBreak(headerRowH);
+        curSeg.items.push({ kind: 'aiTableHeader', x: tableX, y, colWidths, height: headerRowH });
+        y += headerRowH;
+        bullets.forEach(b => {
+          doc.setFont('Calibri', 'normal');
+          doc.setFontSize(6.5);
+          const rowH = Math.max(...b.values.map((v, i) => measureBoldLines(doc, String(v || '-'), colWidths[i] - aiTablePad * 2))) * aiTableLineH + aiTablePad * 2;
+          checkBreak(rowH);
+          curSeg.items.push({ kind: 'aiTableRow', values: b.values, x: tableX, y, colWidths, height: rowH });
+          y += rowH;
+        });
+      } else {
+        bullets.forEach(b => {
+          const indent = b.isSub ? subIndent : 0;
+          const bX = mL + leftCW + padX + indent;
+          const bW = maxTextW - indent;
+          const itemH = b.type === 'image'
+            ? Math.min(maxImgH, maxImgW / (imgRatioCache[b.value] || 1)) + lineH
+            : measureBoldLines(doc, '• ' + b.value, bW) * lineH + bulletGap;
+          checkBreak(itemH);
+          curSeg.items.push({ kind: 'bullet', b, bX, bW, y, itemH });
+          y += itemH;
+        });
+      }
       if (gi < typeGroups.length - 1) y += groupGap;
     });
     curSeg.endY = Math.max(y + padY, curSeg.startY + minH);
@@ -386,6 +430,30 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
           doc.setFontSize(9);
           doc.setTextColor(30, 30, 30);
           doc.text(item.text, mL + leftCW + padX, item.y);
+        } else if (item.kind === 'aiTableHeader') {
+          let x = item.x;
+          doc.setFont('Calibri', 'bold');
+          doc.setFontSize(6.2);
+          AI_TABLE_HEADERS.forEach((h, i) => {
+            doc.setFillColor(232, 244, 251);
+            doc.setDrawColor(184, 217, 236);
+            doc.rect(x, item.y, item.colWidths[i], item.height, 'FD');
+            doc.setTextColor(0, 68, 129);
+            doc.text(doc.splitTextToSize(h, item.colWidths[i] - aiTablePad * 2), x + aiTablePad, item.y + aiTablePad + aiTableLineH - 0.7);
+            x += item.colWidths[i];
+          });
+        } else if (item.kind === 'aiTableRow') {
+          let x = item.x;
+          doc.setFont('Calibri', 'normal');
+          doc.setFontSize(6.5);
+          item.values.forEach((value, i) => {
+            doc.setFillColor(255, 255, 255);
+            doc.setDrawColor(215, 232, 243);
+            doc.rect(x, item.y, item.colWidths[i], item.height, 'FD');
+            doc.setTextColor(50, 50, 50);
+            renderBoldWrapped(doc, String(value || '-'), x + aiTablePad, item.y + aiTablePad + aiTableLineH - 0.7, item.colWidths[i] - aiTablePad * 2, aiTableLineH);
+            x += item.colWidths[i];
+          });
         } else {
           doc.setFont('Calibri', 'normal');
           doc.setFontSize(9);
@@ -406,6 +474,33 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
 
     curY = segments[segments.length - 1].endY;
   }
+  };
+
+  const drawUnitHeader = (unitName) => {
+    const contentBottom = pageH - 15;
+    if (curY + 11 > contentBottom) {
+      doc.addPage();
+      curY = 15;
+    }
+    doc.setFillColor(232, 244, 251);
+    doc.setDrawColor(184, 217, 236);
+    doc.rect(mL, curY + 3, cW, 8, 'FD');
+    doc.setFont('Calibri', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(0, 68, 129);
+    doc.text(unitName || 'Birim', mL + 4, curY + 8.5);
+    curY += 13;
+  };
+
+  if (unitSections?.length) {
+    unitSections.forEach((section, index) => {
+      if (index > 0) curY += 3;
+      drawUnitHeader(section.unitName);
+      renderActionsBlock(section.actions || []);
+    });
+  } else {
+    renderActionsBlock(actions);
+  }
 
   // Bottom border line
   doc.setDrawColor(180, 180, 180);
@@ -415,6 +510,6 @@ export async function generatePdf({ actions, actionStatuses, userData, weeks, fo
   // ─── FOOTER ────────────────────────────────────────────────────────────────
 
   // Save
-  const name = `Haftalik_Rapor_H${formData.week || 'X'}.pdf`;
-  doc.save(name);
+  const name = fileName || `Haftalik_Rapor_H${formData.week || 'X'}.pdf`;
+  doc.save(name.endsWith('.pdf') ? name : `${name}.pdf`);
 }

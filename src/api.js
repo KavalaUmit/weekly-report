@@ -53,11 +53,17 @@ export const getWeeks = (year) =>
 export const getLines = () =>
   json(`${BASE}/api/lines`);
 
+export const getDivisionHierarchy = () =>
+  json(`${BASE}/api/lines/hierarchy`);
+
 export const getActionStatuses = () =>
   json(`${BASE}/api/action-statuses`);
 
 export const getActionTypes = () =>
   json(`${BASE}/api/action-types`);
+
+export const getGainTypes = () =>
+  json(`${BASE}/api/config/gain-types`);
 
 export const getActions = (weekNumber, year, lineId = null) =>
   json(`${BASE}/api/actions?weekNumber=${weekNumber}&year=${year}${lineId ? `&lineId=${lineId}` : ''}`);
